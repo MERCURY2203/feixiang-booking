@@ -1,8 +1,8 @@
-// 橫幅管理（規格書「橫幅管理」，任務 T19）：最多 5 張同時顯示；用 ↑ ↓ 調整順序
+// 橫幅管理（規格書「橫幅管理」，任務 T19）：最多 5 張同時顯示；按住右邊「≡」上下拖動調整順序
 const api = require('../../../utils/api')
 
 Page({
-  data: { list: [], loaded: false },
+  data: { list: [], loaded: false, dragging: -1 },
 
   onShow() {
     this.load()
@@ -25,15 +25,38 @@ Page({
     wx.navigateTo({ url: '/pages/admin/banner-edit/index?edit=1' })
   },
 
-  move(e) {
+  // 拖動排序：按住「≡」上下移動，經過一張卡片的高度就換一個位置，放手後保存
+  dragStart(e) {
     const index = +e.currentTarget.dataset.index
-    const to = index + +e.currentTarget.dataset.delta
-    if (to < 0 || to >= this.data.list.length) return
+    this.drag = { index, startY: e.touches[0].clientY, moved: false }
+    wx.createSelectorQuery().selectAll('.banner-card').boundingClientRect(rects => {
+      if (this.drag && rects.length) this.drag.step = rects[0].height + 12
+    }).exec()
+    this.setData({ dragging: index })
+    wx.vibrateShort({ type: 'light' })
+  },
+
+  dragMove(e) {
+    const d = this.drag
+    if (!d || !d.step) return
+    const offset = Math.round((e.touches[0].clientY - d.startY) / d.step)
+    const to = Math.min(this.data.list.length - 1, Math.max(0, d.index + offset))
+    if (to === this.data.dragging) return
     const list = this.data.list.slice()
-    const [it] = list.splice(index, 1)
+    const [it] = list.splice(this.data.dragging, 1)
     list.splice(to, 0, it)
-    this.setData({ list })
-    api.call('admin', 'bannerReorder', { ids: list.map(b => b._id) }).catch(err => api.toast(err.message))
+    d.moved = true
+    d.startY += (to - this.data.dragging) * d.step
+    d.index = to
+    this.setData({ list, dragging: to })
+  },
+
+  dragEnd() {
+    const d = this.drag
+    this.drag = null
+    this.setData({ dragging: -1 })
+    if (!d || !d.moved) return
+    api.call('admin', 'bannerReorder', { ids: this.data.list.map(b => b._id) }).catch(err => api.toast(err.message))
   },
 
   toggle(e) {

@@ -3,7 +3,8 @@
 .meta { margin-top: 16rpx; align-items: flex-start; }
 .state { font-weight: 600; color: var(--text-2); }
 .state.on { color: var(--primary); }
-.order { display: flex; gap: 12rpx; }
-.arrow { width: 64rpx; height: 64rpx; line-height: 64rpx; text-align: center; border: 1rpx solid var(--border); border-radius: 12rpx; }
+.handle { width: 88rpx; height: 88rpx; line-height: 88rpx; text-align: center; font-size: 48rpx; color: var(--text-2); border: 1rpx solid var(--border); border-radius: 12rpx; }
+.banner-card { margin-bottom: 12px; }
+.dragging { border-color: var(--primary); box-shadow: 0 8rpx 24rpx rgba(43, 90, 174, 0.25); transform: scale(1.02); }
 .ops { display: flex; justify-content: flex-end; gap: 40rpx; margin-top: 16rpx; color: var(--primary); font-size: 30rpx; }
 .danger { color: var(--danger); }

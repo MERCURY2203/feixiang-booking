@@ -1,8 +1,8 @@
 <admin-drawer current="banners" title="横幅管理" />
 <view class="container">
-  <view class="muted tip">最多 5 张同时显示，每张停留 10 秒；顺序即首页轮播顺序</view>
+  <view class="muted tip">最多 5 张同时显示，每张停留 10 秒；按住右边「≡」上下拖动调整顺序</view>
   <view wx:if="{{loaded && !list.length}}" class="placeholder">还没有横幅</view>
-  <view wx:for="{{list}}" wx:key="_id" class="card">
+  <view wx:for="{{list}}" wx:key="_id" class="card banner-card {{dragging === index ? 'dragging' : ''}}">
     <image class="img" src="{{item.image}}" mode="aspectFill" data-index="{{index}}" bindtap="edit" />
     <view class="row meta">
       <view>
@@ -10,10 +10,7 @@
         <view class="muted">{{item.targetText}}</view>
         <view wx:if="{{item.mode === 'timed'}}" class="muted">{{item.startDate}} {{item.startTime}} 至 {{item.endDate}} {{item.endTime}}</view>
       </view>
-      <view class="order">
-        <view class="arrow" data-index="{{index}}" data-delta="-1" bindtap="move">↑</view>
-        <view class="arrow" data-index="{{index}}" data-delta="1" bindtap="move">↓</view>
-      </view>
+      <view class="handle" data-index="{{index}}" catchtouchstart="dragStart" catchtouchmove="dragMove" catchtouchend="dragEnd" catchtouchcancel="dragEnd">≡</view>
     </view>
     <view class="ops">
       <text data-index="{{index}}" bindtap="edit">编辑</text>
