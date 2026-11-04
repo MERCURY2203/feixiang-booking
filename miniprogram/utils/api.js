@@ -6,7 +6,7 @@ function call(name, action, data = {}) {
       const r = res.result || {}
       if (r.ok) return r.data
       const err = new Error(r.message || '操作失败，请稍后再试')
-      err.code = r.code
+      Object.assign(err, r) // code、orderId、invalid 等額外信息
       throw err
     })
 }

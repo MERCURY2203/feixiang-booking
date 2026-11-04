@@ -1,4 +1,14 @@
 <view class="container">
-  <view class="placeholder">活动商品开发中（任务 T14）</view>
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">暂无活动，敬请期待</view>
+  <view wx:for="{{list}}" wx:key="_id" class="pcard" data-index="{{index}}" bindtap="open">
+    <image class="pimg" src="{{item.image}}" mode="aspectFill" />
+    <view class="pname">{{item.name}}</view>
+    <view class="pbar">
+      <text class="pprice">{{item.priceText}}</text>
+      <button class="btn {{item.stock > 0 ? 'btn-primary' : ''}} add" disabled="{{item.stock <= 0}}" data-index="{{index}}" catchtap="add">{{item.stock > 0 ? '加入购物车' : '已售罄'}}</button>
+    </view>
+  </view>
+  <view class="bottom-spacer"></view>
 </view>
+<cart-fab count="{{cartCount}}" />
 <privacy-modal />

@@ -1,0 +1,7 @@
+.countdown { text-align: center; padding: 40rpx 0 48rpx; }
+.countdown .time { font-size: 88rpx; font-weight: 600; color: var(--danger); font-variant-numeric: tabular-nums; }
+.countdown .hint { color: var(--danger); font-size: 30rpx; }
+.countdown.closed .time { font-size: 48rpx; color: var(--text); }
+.countdown.closed .hint { color: var(--text-2); }
+.line { padding: 20rpx 0; border-bottom: 1rpx solid var(--border); font-size: 30rpx; }
+.total { font-weight: 600; border-bottom: none; }

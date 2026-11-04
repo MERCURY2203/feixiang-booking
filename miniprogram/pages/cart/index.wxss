@@ -1,0 +1,17 @@
+.tip { background: var(--primary-light); color: var(--primary); border-radius: 16rpx; padding: 20rpx 28rpx; margin-bottom: 24rpx; font-size: 28rpx; }
+.link { color: var(--primary); font-weight: 600; }
+.group { margin-bottom: 8rpx; }
+.line { display: flex; align-items: center; gap: 20rpx; padding: 24rpx 0; border-top: 1rpx solid var(--border); }
+.main { flex: 1; min-width: 0; }
+.price { font-weight: 600; }
+.del { color: var(--danger); font-size: 28rpx; padding-left: 8rpx; }
+.invalid .main, .invalid .price { color: var(--disabled-text); }
+.reason { color: var(--disabled-text); font-size: 26rpx; }
+.stepper { display: flex; align-items: center; margin-top: 12rpx; }
+.step { width: 64rpx; height: 56rpx; line-height: 56rpx; text-align: center; border: 1rpx solid var(--border); border-radius: 8rpx; font-size: 32rpx; }
+.qty { width: 80rpx; text-align: center; }
+.bottom-bar { align-items: center; }
+.bottom-bar .clear { color: var(--text-2); font-size: 30rpx; padding: 0 8rpx; }
+.bottom-bar .sum { flex: 1; text-align: right; font-size: 28rpx; }
+.total { font-size: 38rpx; font-weight: 600; color: var(--text); }
+.bottom-bar .go { flex: none; width: 220rpx; }

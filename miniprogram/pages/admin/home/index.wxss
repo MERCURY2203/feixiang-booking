@@ -1,0 +1,12 @@
+.scan { height: 200rpx; font-size: 44rpx; margin: 16rpx 0 32rpx; border-radius: 24rpx; }
+.input-row { display: flex; gap: 20rpx; margin-top: 20rpx; }
+.code-input { flex: 1; height: 92rpx; border: 1rpx solid var(--border); border-radius: 16rpx; padding: 0 24rpx; font-size: 40rpx; letter-spacing: 8rpx; }
+.go { width: 160rpx; }
+.mask { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; }
+.panel { width: 82%; background: #FFFFFF; border-radius: 24rpx; padding: 40rpx; }
+.label { margin-top: 24rpx; }
+.stepper { display: flex; align-items: center; justify-content: center; margin: 16rpx 0 8rpx; }
+.step { width: 88rpx; height: 76rpx; line-height: 76rpx; text-align: center; border: 1rpx solid var(--border); border-radius: 12rpx; font-size: 38rpx; }
+.qty { width: 110rpx; text-align: center; font-size: 44rpx; font-weight: 600; }
+.actions { display: flex; gap: 20rpx; margin-top: 32rpx; }
+.actions .btn { flex: 1; }

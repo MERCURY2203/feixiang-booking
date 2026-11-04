@@ -1,0 +1,23 @@
+.seg { display: flex; border: 1rpx solid var(--primary); border-radius: 12rpx; overflow: hidden; }
+.seg-item { flex: 1; text-align: center; height: 76rpx; line-height: 76rpx; color: var(--primary); }
+.seg-item.on { background: var(--primary); color: #FFFFFF; font-weight: 600; }
+.range { display: flex; align-items: center; gap: 16rpx; margin: 20rpx 0; }
+.chip { padding: 12rpx 24rpx; background: #FFFFFF; border: 1rpx solid var(--border); border-radius: 12rpx; }
+.metrics { display: flex; flex-wrap: wrap; gap: 16rpx; }
+.metric { width: calc(50% - 8rpx); box-sizing: border-box; background: #FFFFFF; border: 1rpx solid var(--border); border-radius: 16rpx; padding: 20rpx 24rpx; }
+.mlabel { font-size: 26rpx; color: var(--text-2); }
+.mval { font-size: 40rpx; font-weight: 600; }
+.mval.sm { font-size: 32rpx; }
+.danger { color: var(--danger); }
+.note { margin: 16rpx 0 24rpx; }
+.trow { display: flex; font-size: 24rpx; padding: 12rpx 0; border-bottom: 1rpx solid var(--border); }
+.trow text { flex: 1; text-align: right; }
+.trow text:first-child { flex: 1.3; text-align: left; }
+.th { color: var(--text-2); }
+.empty { padding: 20rpx 0; }
+.bar-row { display: flex; align-items: center; gap: 16rpx; margin: 12rpx 0; font-size: 26rpx; }
+.bar-label { width: 110rpx; }
+.bar { flex: 1; height: 24rpx; background: var(--past); border-radius: 12rpx; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--primary); }
+.bar-val { width: 100rpx; text-align: right; }
+.hot { padding: 12rpx 0; }

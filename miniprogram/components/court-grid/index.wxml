@@ -1,0 +1,13 @@
+<scroll-view class="wrap" scroll-x scroll-y enhanced show-scrollbar="{{false}}" style="height: {{height}}px">
+  <view class="grid">
+    <view class="row head">
+      <view class="corner">时间</view>
+      <view wx:for="{{courts}}" wx:key="*this" class="hcell">{{item}}号场</view>
+    </view>
+    <view wx:for="{{hours}}" wx:for-item="h" wx:for-index="r" wx:key="hour" class="row">
+      <view class="tcell">{{h.label}}</view>
+      <view wx:for="{{cells[r]}}" wx:for-item="c" wx:for-index="ci" wx:key="ci" class="cell {{c.cls}}" data-r="{{r}}" data-c="{{ci}}" bindtap="onTap">{{c.text}}</view>
+    </view>
+    <view class="tail"></view>
+  </view>
+</scroll-view>

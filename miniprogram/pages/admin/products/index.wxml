@@ -1,0 +1,15 @@
+<admin-drawer current="products" title="商品管理" />
+<view class="container">
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">还没有商品，点击下方按钮新增</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card pc" data-id="{{item._id}}" bindtap="edit">
+    <image class="thumb" src="{{item.image}}" mode="aspectFill" />
+    <view class="info">
+      <view class="card-title">{{item.name}}</view>
+      <view class="muted">{{item.priceText}} · 库存 {{item.stock}} · 已售 {{item.soldCount}}</view>
+      <view class="muted">{{item.fixedDate ? '固定日期：' + item.validity : '长期有效'}}</view>
+    </view>
+    <view class="shelf {{item.onShelf ? 'on' : ''}}" data-index="{{index}}" catchtap="toggle">{{item.onShelf ? '已上架' : '已下架'}}</view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="edit">+ 新增商品</button></view>

@@ -1,0 +1,32 @@
+<view class="container">
+  <view wx:if="{{order && !closed}}" class="countdown">
+    <view class="time">{{confirming ? '…' : left}}</view>
+    <view class="hint">{{confirming ? '正在确认支付结果…' : '请在此时间内完成支付'}}</view>
+  </view>
+  <view wx:if="{{closed}}" class="countdown closed">
+    <view class="time">{{order.statusText === '已取消' ? '订单已取消' : '订单已关闭'}}</view>
+    <view class="hint">场地已释放，可重新预订</view>
+  </view>
+
+  <view wx:if="{{order}}" class="card">
+    <view class="card-title">订单明细</view>
+    <view wx:for="{{items}}" wx:key="title" class="line row">
+      <text>{{item.title}}</text>
+      <text>{{item.amountText}}</text>
+    </view>
+    <view class="line row total">
+      <text>合计</text>
+      <text>{{totalText}}</text>
+    </view>
+    <view class="muted">订单号：{{order._id}}</view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar" wx:if="{{order}}">
+  <block wx:if="{{!closed}}">
+    <button class="btn btn-danger" disabled="{{confirming}}" bindtap="cancelOrder">取消订单</button>
+    <button class="btn btn-primary" disabled="{{confirming}}" bindtap="continuePay">继续支付</button>
+  </block>
+  <button wx:else class="btn btn-primary" bindtap="backToBooking">返回订场</button>
+</view>

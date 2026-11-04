@@ -1,4 +1,32 @@
 <admin-drawer current="verify" title="核销" />
 <view class="container">
-  <view class="placeholder">核销功能开发中（任务 T15）</view>
+  <button class="btn btn-primary scan" bindtap="scan">扫码核销</button>
+
+  <view class="card">
+    <view class="card-title">手动输入券码</view>
+    <view class="input-row">
+      <input class="code-input" type="number" maxlength="6" placeholder="6 位数字" value="{{code}}" bindinput="onInput" confirm-type="search" bindconfirm="submitCode" />
+      <button class="btn btn-secondary go" bindtap="submitCode">查询</button>
+    </view>
+  </view>
+
+  <button class="btn btn-secondary" bindtap="goLogs">核销记录</button>
+</view>
+
+<view wx:if="{{info}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <view class="card-title">{{info.name}}</view>
+    <view class="muted">客人：{{info.phone || '未授权'}}</view>
+    <view class="muted">可用张数：{{info.available}}</view>
+    <view class="label">本次核销</view>
+    <view class="stepper">
+      <view class="step" data-delta="-1" bindtap="change">－</view>
+      <view class="qty">{{qty}}</view>
+      <view class="step" data-delta="1" bindtap="change">＋</view>
+    </view>
+    <view class="actions">
+      <button class="btn btn-secondary" bindtap="close">取消</button>
+      <button class="btn btn-primary" bindtap="confirm">确认核销</button>
+    </view>
+  </view>
 </view>

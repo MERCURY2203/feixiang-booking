@@ -1,0 +1,17 @@
+<view class="container">
+  <picker mode="date" value="{{day}}" end="{{today}}" bindchange="pickDay">
+    <view class="card row"><text>日期</text><text class="link">{{day}} ›</text></view>
+  </picker>
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">当天没有核销记录</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card">
+    <view class="row">
+      <text class="card-title">{{item.type === 'undo' ? '【撤销】' : ''}}{{item.name}} ×{{item.qty}}</text>
+      <text class="muted">{{item.time}}</text>
+    </view>
+    <view class="muted">客人：{{item.phone || '—'}} · 操作人：{{item.operator}}</view>
+    <view class="row foot">
+      <text class="muted">{{item.undone ? '已撤销' : ''}}</text>
+      <text wx:if="{{item.canUndo}}" class="undo" data-index="{{index}}" bindtap="undo">撤销</text>
+    </view>
+  </view>
+</view>

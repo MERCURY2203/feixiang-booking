@@ -1,0 +1,8 @@
+<view wx:if="{{show}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <view class="title">授权手机号</view>
+    <view class="desc">下单需要手机号，方便球馆在需要时与你联系。</view>
+    <button class="btn btn-primary" open-type="getPhoneNumber" bindgetphonenumber="onPhone">授权手机号</button>
+    <view class="plain" bindtap="cancel">暂不授权</view>
+  </view>
+</view>

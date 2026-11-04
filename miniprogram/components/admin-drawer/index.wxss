@@ -9,3 +9,8 @@
 .drawer-item { padding: 0 40rpx; height: 104rpx; line-height: 104rpx; font-size: 32rpx; }
 .drawer-item.on { background: var(--primary-light); color: var(--primary); font-weight: 600; }
 .drawer-item.back { margin-top: auto; margin-bottom: env(safe-area-inset-bottom); border-top: 1rpx solid var(--border); color: var(--text-2); }
+.menu-btn { position: relative; }
+.dot { position: absolute; top: 20rpx; right: 18rpx; width: 16rpx; height: 16rpx; border-radius: 50%; background: var(--danger); }
+.drawer-item { display: flex; align-items: center; justify-content: space-between; }
+.count { min-width: 40rpx; height: 40rpx; line-height: 40rpx; padding: 0 10rpx; border-radius: 20rpx; background: var(--danger); color: #FFFFFF; font-size: 24rpx; text-align: center; font-weight: 400; }
+.topbar-title { flex: 1; }

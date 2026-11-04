@@ -1,0 +1,55 @@
+<view class="container">
+  <view class="card">
+    <view class="label">商品图片（最多 6 张，第一张为封面）</view>
+    <view class="imgs">
+      <view wx:for="{{images}}" wx:key="*this" class="img-box">
+        <image class="img" src="{{item}}" mode="aspectFill" />
+        <view class="img-del" data-index="{{index}}" bindtap="removeImage">×</view>
+      </view>
+      <view wx:if="{{images.length < 6}}" class="img-add" bindtap="addImage">＋</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="label">名称</view>
+    <input class="field" value="{{name}}" data-field="name" bindinput="input" placeholder="例如：亲子泥塑 两小时" />
+    <view class="label">价格（元）</view>
+    <input class="field" type="digit" value="{{price}}" data-field="price" bindinput="input" placeholder="例如：88.50" />
+    <view class="label">库存</view>
+    <input class="field" type="number" value="{{stock}}" data-field="stock" bindinput="input" placeholder="例如：20" />
+  </view>
+
+  <view class="card">
+    <view class="label">类型</view>
+    <view class="seg">
+      <view class="seg-item {{!fixedDate ? 'on' : ''}}" data-fixed="0" bindtap="setType">长期</view>
+      <view class="seg-item {{fixedDate ? 'on' : ''}}" data-fixed="1" bindtap="setType">固定日期</view>
+    </view>
+    <block wx:if="{{fixedDate}}">
+      <view class="label">活动日期</view>
+      <picker mode="date" start="{{today}}" value="{{activityDate}}" data-field="activityDate" bindchange="input">
+        <view class="field picker">{{activityDate || '选择日期'}}</view>
+      </picker>
+      <view class="label">开始时间</view>
+      <picker mode="time" value="{{activityStartTime}}" data-field="activityStartTime" bindchange="input">
+        <view class="field picker">{{activityStartTime || '选择时间'}}</view>
+      </picker>
+      <view class="muted">客人可退款至开始前 15 分钟；活动当天 23:59 后未使用的自动全额退款</view>
+    </block>
+    <view wx:else class="muted">长期有效，不会过期</view>
+  </view>
+
+  <view class="card">
+    <view class="label">活动说明</view>
+    <textarea class="area" value="{{desc}}" data-field="desc" bindinput="input" maxlength="2000" placeholder="介绍活动内容、注意事项等" />
+  </view>
+
+  <view class="card row">
+    <text>上架</text>
+    <switch checked="{{onShelf}}" color="#2B5AAE" bindchange="toggleShelf" />
+  </view>
+
+  <view wx:if="{{id}}" class="del" bindtap="remove">{{soldCount > 0 ? '已售出的商品不能删除，只能下架' : '删除商品'}}</view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="save">保存</button></view>

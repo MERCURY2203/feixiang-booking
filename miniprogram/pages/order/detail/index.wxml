@@ -1,0 +1,56 @@
+<view class="container" wx:if="{{order}}">
+  <view class="card head">
+    <view class="row">
+      <text class="status">{{order.statusText}}</text>
+      <text class="amount">{{order.totalText}}</text>
+    </view>
+    <view wx:if="{{order.refundedFee > 0}}" class="muted">已退款 {{order.refundedText}}，原路退回，1–3 个工作日到账</view>
+    <view wx:if="{{order.status === 'timeout_refunded'}}" class="muted">订单已超时，款项已全额退回，1–3 个工作日到账</view>
+    <view class="muted">订单号：{{order._id}}</view>
+  </view>
+
+  <view wx:for="{{items}}" wx:key="_id" class="card item" data-index="{{index}}" bindtap="openCoupon">
+    <view class="row top">
+      <view class="title">{{item.title}}</view>
+      <view class="price">{{item.priceText}}{{item.kind === 'product' ? ' /张' : ''}}</view>
+    </view>
+    <view wx:if="{{item.note}}" class="muted">{{item.note}}</view>
+    <view wx:if="{{item.state}}" class="state">{{item.state}}</view>
+    <view wx:if="{{item.hasCode}}" class="code-hint">点击查看券码</view>
+    <view class="refund-wrap">
+      <text wx:if="{{item.refundHint && !item.canRefund}}" class="refund-hint">{{item.refundHint}}</text>
+      <text class="refund {{item.canRefund ? '' : 'off'}}" data-index="{{index}}" catchtap="refund">退款</text>
+    </view>
+  </view>
+
+  <view wx:if="{{hasCourt}}" class="card rule">
+    <view class="card-title">退款规则</view>
+    <view class="muted">羽毛球场地可在开场前 15 分钟之前取消并全额退款，之后不能自行退款；如有特殊情况请联系球馆。</view>
+  </view>
+</view>
+
+<view wx:if="{{coupon}}" class="mask" bindtap="closeCoupon" catchtouchmove="noop">
+  <view class="panel" catchtap="noop">
+    <view class="card-title">{{coupon.name}}</view>
+    <image class="qr" src="{{coupon.qr}}" mode="aspectFit" />
+    <view class="code">{{coupon.code}}</view>
+    <view class="muted">可用 {{coupon.available}} 张 · 出示给工作人员核销</view>
+    <button class="btn btn-secondary close" bindtap="closeCoupon">关闭</button>
+  </view>
+</view>
+
+<view wx:if="{{refundSheet}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <view class="card-title">选择退款张数</view>
+    <view class="stepper">
+      <view class="step" data-delta="-1" bindtap="changeRefundQty">－</view>
+      <view class="qty">{{refundSheet.qty}}</view>
+      <view class="step" data-delta="1" bindtap="changeRefundQty">＋</view>
+    </view>
+    <view class="muted">最多可退 {{refundSheet.max}} 张 · 退款 {{refundSheet.amountText}}</view>
+    <view class="sheet-actions">
+      <button class="btn btn-secondary" bindtap="closeRefundSheet">取消</button>
+      <button class="btn btn-primary" bindtap="submitRefundSheet">下一步</button>
+    </view>
+  </view>
+</view>

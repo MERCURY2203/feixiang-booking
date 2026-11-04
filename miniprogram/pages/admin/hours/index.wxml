@@ -1,0 +1,59 @@
+<admin-drawer current="hours" title="营业时间" />
+<view class="tabs">
+  <view class="tab {{tab === 'daily' ? 'on' : ''}}" data-tab="daily" bindtap="switchTab">日常营业时间</view>
+  <view class="tab {{tab === 'special' ? 'on' : ''}}" data-tab="special" bindtap="switchTab">特殊日期</view>
+</view>
+
+<view class="container" wx:if="{{cfg}}">
+  <block wx:if="{{tab === 'daily'}}">
+    <view class="card">
+      <view class="card-title">当前营业时间</view>
+      <view class="big">每天 {{range[0][cfg.daily.open]}}–{{range[0][cfg.daily.close]}}</view>
+    </view>
+    <view wx:for="{{cfg.scheduled}}" wx:key="_id" class="card">
+      <view class="muted">{{item.effectiveFrom}} 起生效</view>
+      <view>每天 {{range[0][item.open]}}–{{range[0][item.close]}}</view>
+    </view>
+    <view class="card">
+      <view class="card-title">修改日常营业时间</view>
+      <picker mode="multiSelector" range="{{range}}" value="{{daily.idx}}" bindchange="pickDaily">
+        <view class="field">{{range[0][daily.idx[0]]}} 至 {{range[1][daily.idx[1]]}}</view>
+      </picker>
+      <view class="seg">
+        <view class="seg-item {{daily.mode === 'now' ? 'on' : ''}}" data-mode="now" bindtap="setMode">立即生效</view>
+        <view class="seg-item {{daily.mode === 'date' ? 'on' : ''}}" data-mode="date" bindtap="setMode">指定日期生效</view>
+      </view>
+      <picker wx:if="{{daily.mode === 'date'}}" mode="date" start="{{today}}" value="{{daily.from}}" bindchange="pickFrom">
+        <view class="field">{{daily.from || '选择生效日期'}}</view>
+      </picker>
+      <view class="muted note">缩短营业时间时，如被缩掉的时段已有订单，需先处理这些订单</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view wx:if="{{!cfg.special.length}}" class="placeholder">暂无特殊日期</view>
+    <view wx:for="{{cfg.special}}" wx:key="_id" class="card row">
+      <view>
+        <view class="card-title">{{item.dateText}}</view>
+        <view class="muted">{{item.closed ? '全天休息' : range[0][item.open] + '–' + range[0][item.close]}}</view>
+      </view>
+      <text class="danger" data-index="{{index}}" bindtap="removeSpecial">删除</text>
+    </view>
+    <view class="card">
+      <view class="card-title">新增特殊日期</view>
+      <picker mode="date" start="{{today}}" value="{{sp.date}}" bindchange="pickSpDate">
+        <view class="field">{{sp.date || '选择日期'}}</view>
+      </picker>
+      <view class="row closed"><text>全天休息</text><switch checked="{{sp.closed}}" color="#2B5AAE" bindchange="toggleClosed" /></view>
+      <picker wx:if="{{!sp.closed}}" mode="multiSelector" range="{{range}}" value="{{sp.idx}}" bindchange="pickSp">
+        <view class="field">{{range[0][sp.idx[0]]}} 至 {{range[1][sp.idx[1]]}}</view>
+      </picker>
+    </view>
+  </block>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar">
+  <button wx:if="{{tab === 'daily'}}" class="btn btn-primary" bindtap="saveDaily">保存日常营业时间</button>
+  <button wx:else class="btn btn-primary" bindtap="saveSpecial">+ 保存特殊日期</button>
+</view>

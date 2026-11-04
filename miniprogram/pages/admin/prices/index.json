@@ -1,0 +1,4 @@
+{
+  "navigationBarTitleText": "管理后台",
+  "usingComponents": { "admin-drawer": "/components/admin-drawer/index", "court-grid": "/components/court-grid/index" }
+}

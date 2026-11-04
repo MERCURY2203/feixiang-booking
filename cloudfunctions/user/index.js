@@ -85,6 +85,22 @@ exports.main = async event => {
         return ok(publicUser({ ...user, ...data }))
       }
 
+      // 註銷帳號（規格書「我的 · 其他入口」、澄清 C6）：訂單和金額記錄保留，個人資料刪除
+      case 'deleteAccount': {
+        const _ = db.command
+        const now = Date.now()
+        const pending = await db.collection('orders').where({ userId: user._id, status: 'pending' }).count()
+        const courts = await db.collection('order_items').where({ userId: user._id, kind: 'court', status: 'active', startAt: _.gt(now) }).count()
+        const coupons = await db.collection('order_items').where({ userId: user._id, kind: 'product', codeActive: true }).count()
+        if (pending.total || courts.total || coupons.total) return fail('你还有未使用的场地或券，请先使用或退款后再注销', 'HAS_ACTIVE')
+        if (user.role !== 'customer') return fail('老板和员工请先由老板移除身份后再注销')
+        await db.collection('orders').where({ userId: user._id }).update({ data: { phone: '', deletedUser: true } })
+        await users.doc(user._id).update({
+          data: { openid: `deleted_${user._id}`, phone: '', nickname: '', avatar: '', deletedAt: now }
+        })
+        return ok(true)
+      }
+
       default:
         return fail('未知操作')
     }

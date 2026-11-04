@@ -1,0 +1,43 @@
+<view class="container">
+  <view class="card">
+    <view class="card-title">1. 选择日期</view>
+    <view class="seg">
+      <view class="seg-item {{mode === 'multi' ? 'on' : ''}}" data-mode="multi" bindtap="setMode">逐天选</view>
+      <view class="seg-item {{mode === 'range' ? 'on' : ''}}" data-mode="range" bindtap="setMode">选一段</view>
+    </view>
+    <view class="row month">
+      <text class="arrow" bindtap="prevMonth">‹</text>
+      <text>{{year}}年{{month}}月</text>
+      <text class="arrow" bindtap="nextMonth">›</text>
+    </view>
+    <view class="cal">
+      <view wx:for="{{weeks}}" wx:key="*this" class="wk">{{item}}</view>
+      <view wx:for="{{cells}}" wx:key="index" class="day {{item.past ? 'past' : ''}} {{item.cls}}" data-index="{{index}}" bindtap="tapDay">{{item.d || ''}}</view>
+    </view>
+    <view class="muted">{{count ? '已选 ' + count + ' 天' : (mode === 'multi' ? '点日期选择，可跳着选多天' : '先点开始日期，再点结束日期')}}</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">2. 时间段</view>
+    <picker mode="multiSelector" range="{{range}}" value="{{hourIndex}}" bindchange="pickHours">
+      <view class="field">{{hours[hourIndex[0]]}} 至 {{hours[hourIndex[1]]}}</view>
+    </picker>
+  </view>
+
+  <view class="card">
+    <view class="row"><text class="card-title">3. 场地</text><text class="link" bindtap="toggleAll">{{allOn ? '取消全选' : '全选'}}</text></view>
+    <scroll-view scroll-y class="courts">
+      <view wx:for="{{courts}}" wx:key="n" class="court row" data-index="{{index}}" bindtap="toggleCourt">
+        <text>{{item.n}}号场</text>
+        <view class="check {{item.on ? 'on' : ''}}">{{item.on ? '✓' : ''}}</view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">4. 价格（元/小时）</view>
+    <input class="field" type="digit" value="{{price}}" bindinput="inputPrice" placeholder="例如：120.00" />
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="save">保存</button></view>

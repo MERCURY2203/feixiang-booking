@@ -1,0 +1,60 @@
+<view class="container" wx:if="{{order}}">
+  <view wx:if="{{order.refundWarn}}" class="warn">{{order.refundWarn}}</view>
+  <view class="card">
+    <view class="row"><text class="card-title">{{order.statusText}}</text><text class="card-title">{{order.totalText}}</text></view>
+    <view class="muted">下单时间：{{order.created}}</view>
+    <view class="muted">订单号：{{order._id}}</view>
+    <view wx:if="{{order.refundedFee > 0}}" class="muted">已退款：{{order.refundedText}}</view>
+    <view class="row phone">
+      <text>客人：{{phone || order.phone}}</text>
+      <text wx:if="{{order.hasPhone && !phone}}" class="link" bindtap="viewPhone">查看电话</text>
+      <text wx:if="{{phone}}" class="link" bindtap="call">拨打</text>
+    </view>
+  </view>
+
+  <view wx:for="{{items}}" wx:key="_id" class="card item {{selected[item._id] ? 'picked' : ''}}">
+    <view class="row top">
+      <view wx:if="{{item.canRefund}}" class="check {{selected[item._id] ? 'on' : ''}}" data-index="{{index}}" bindtap="toggleSelect">{{selected[item._id] ? '✓' : ''}}</view>
+      <view class="title">{{item.title}}</view>
+      <view class="muted">{{item.priceText}}{{item.kind === 'product' ? '/张' : ''}}</view>
+    </view>
+    <view class="state">{{item.state}}</view>
+    <view class="row foot">
+      <text class="muted">{{item.canRefund ? '可退 ' + item.refundableText : ''}}</text>
+      <text class="refund {{item.canRefund ? '' : 'off'}}" data-index="{{index}}" bindtap="openRefund">退款</text>
+    </view>
+  </view>
+
+  <view wx:if="{{refunds.length}}" class="card">
+    <view class="card-title">退款记录</view>
+    <view wx:for="{{refunds}}" wx:key="time" class="row log">
+      <text class="muted">{{item.time}} · {{item.by}}{{item.reason ? ' · ' + item.reason : ''}}</text>
+      <text>{{item.amountText}}</text>
+    </view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar" wx:if="{{selectedCount > 0}}">
+  <button class="btn btn-danger" bindtap="refundSelected">合并退款（{{selectedCount}} 项）</button>
+</view>
+
+<view wx:if="{{sheet}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <view class="card-title">{{sheet.item.title}}</view>
+    <view wx:if="{{sheet.item.kind === 'product'}}">
+      <view class="label">退款张数（未使用 {{sheet.item.available}} 张）</view>
+      <view class="stepper">
+        <view class="step" data-delta="-1" bindtap="sheetQty">－</view>
+        <view class="qty">{{sheet.qty}}</view>
+        <view class="step" data-delta="1" bindtap="sheetQty">＋</view>
+      </view>
+    </view>
+    <view class="label">退款金额（元，最多 {{sheet.max}}）</view>
+    <input class="amount-input" type="digit" value="{{sheet.amount}}" bindinput="sheetAmount" />
+    <view class="actions">
+      <button class="btn btn-secondary" bindtap="closeSheet">取消</button>
+      <button class="btn btn-primary" bindtap="submitSheet">下一步</button>
+    </view>
+  </view>
+</view>

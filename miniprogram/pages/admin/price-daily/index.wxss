@@ -1,0 +1,18 @@
+.seg { display: flex; border: 1rpx solid var(--primary); border-radius: 12rpx; overflow: hidden; margin: 16rpx 0; }
+.seg-item { flex: 1; text-align: center; height: 76rpx; line-height: 76rpx; color: var(--primary); }
+.seg-item.on { background: var(--primary); color: #FFFFFF; font-weight: 600; }
+.month { margin: 8rpx 0; font-weight: 600; }
+.arrow { padding: 0 24rpx; font-size: 44rpx; color: var(--primary); }
+.cal { display: flex; flex-wrap: wrap; margin-bottom: 12rpx; }
+.wk, .day { width: 14.2857%; text-align: center; height: 76rpx; line-height: 76rpx; }
+.wk { color: var(--text-2); font-size: 26rpx; }
+.day { border-radius: 12rpx; }
+.day.past { color: var(--disabled-text); }
+.day.on { background: var(--primary); color: #FFFFFF; font-weight: 600; }
+.day.mid { background: var(--primary-light); color: var(--primary); }
+.field { margin-top: 16rpx; height: 84rpx; line-height: 84rpx; border: 1rpx solid var(--border); border-radius: 12rpx; padding: 0 20rpx; }
+.link { color: var(--primary); }
+.courts { max-height: 520rpx; margin-top: 8rpx; }
+.court { height: 88rpx; border-bottom: 1rpx solid var(--border); }
+.check { width: 44rpx; height: 44rpx; border: 2rpx solid var(--text-2); border-radius: 8rpx; text-align: center; line-height: 44rpx; color: #FFFFFF; }
+.check.on { background: var(--primary); border-color: var(--primary); }

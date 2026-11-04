@@ -1,0 +1,24 @@
+<view class="tabs">
+  <view wx:for="{{tabs}}" wx:key="key" class="tab {{item.key === tab ? 'on' : ''}}" data-key="{{item.key}}" bindtap="switchTab">{{item.name}}</view>
+</view>
+<view class="tabs-spacer"></view>
+
+<view class="container">
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">暂无订单</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card" data-index="{{index}}" bindtap="open">
+    <view class="row">
+      <text class="muted">{{item.created}}</text>
+      <text class="status {{item.status}}">{{item.statusText}}</text>
+    </view>
+    <view class="summary">{{item.summary}}</view>
+    <view class="row">
+      <text wx:if="{{item.status === 'pending'}}" class="left">剩余 {{item.left}}</text>
+      <text wx:else></text>
+      <text class="amount">{{item.totalText}}</text>
+    </view>
+    <view wx:if="{{item.status === 'pending'}}" class="actions" catchtap="noop">
+      <button class="btn btn-danger mini" data-index="{{index}}" catchtap="cancel">取消订单</button>
+      <button class="btn btn-primary mini" data-index="{{index}}" catchtap="pay">去支付</button>
+    </view>
+  </view>
+</view>

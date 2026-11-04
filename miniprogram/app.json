@@ -3,8 +3,26 @@
     "pages/booking/index",
     "pages/activity/index",
     "pages/me/index",
+    "pages/cart/index",
+    "pages/product/index",
+    "pages/order/pay/index",
+    "pages/order/result/index",
+    "pages/order/list/index",
+    "pages/order/detail/index",
     "pages/bind/index",
     "pages/admin/home/index",
+    "pages/admin/verify-logs/index",
+    "pages/admin/orders/index",
+    "pages/admin/order-detail/index",
+    "pages/admin/courts/index",
+    "pages/admin/products/index",
+    "pages/admin/product-edit/index",
+    "pages/admin/banners/index",
+    "pages/admin/banner-edit/index",
+    "pages/admin/prices/index",
+    "pages/admin/price-daily/index",
+    "pages/admin/hours/index",
+    "pages/admin/reports/index",
     "pages/admin/staff/index"
   ],
   "window": {
@@ -19,9 +37,18 @@
     "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/booking/index", "text": "订场" },
-      { "pagePath": "pages/activity/index", "text": "活动" },
-      { "pagePath": "pages/me/index", "text": "我的" }
+      {
+        "pagePath": "pages/booking/index",
+        "text": "订场"
+      },
+      {
+        "pagePath": "pages/activity/index",
+        "text": "活动"
+      },
+      {
+        "pagePath": "pages/me/index",
+        "text": "我的"
+      }
     ]
   },
   "usingComponents": {

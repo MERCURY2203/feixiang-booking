@@ -1,0 +1,66 @@
+<admin-drawer current="prices" title="价格设置" />
+<view class="tabs">
+  <view class="tab {{tab === 'regular' ? 'on' : ''}}" data-tab="regular" bindtap="switchTab">常用价格</view>
+  <view class="tab {{tab === 'daily' ? 'on' : ''}}" data-tab="daily" bindtap="switchTab">单日价格</view>
+</view>
+
+<view class="container" wx:if="{{cfg}}">
+  <picker mode="date" start="{{today}}" value="{{previewDate}}" bindchange="pickPreview">
+    <view class="card row preview-entry"><text>价格预览</text><text class="link">{{previewDate || '选择日期'}} ›</text></view>
+  </picker>
+  <view wx:if="{{preview}}" class="card preview">
+    <view class="row"><text class="muted">蓝色格子为单日价格</text><text class="link" bindtap="closePreview">收起</text></view>
+    <view wx:if="{{preview.closed}}" class="placeholder">当天全天休息</view>
+    <court-grid wx:else courts="{{preview.courts}}" hours="{{preview.hours}}" cells="{{preview.cells}}" height="{{320}}" />
+  </view>
+
+  <block wx:if="{{tab === 'regular'}}">
+    <view class="card">
+      <view class="card-title">当前常用价格</view>
+      <view class="row line"><text>平日（周一至周五）</text><text class="strong">{{cfg.regular.weekdayText}}/小时</text></view>
+      <view class="row line"><text>周末（周六日）</text><text class="strong">{{cfg.regular.weekendText}}/小时</text></view>
+    </view>
+    <view wx:for="{{cfg.scheduled}}" wx:key="_id" class="card">
+      <view class="muted">{{item.effectiveFrom}} 起生效</view>
+      <view>平日 {{item.weekdayText}} ／ 周末 {{item.weekendText}}</view>
+    </view>
+    <view class="card">
+      <view class="card-title">修改常用价格</view>
+      <view class="label">平日价格（元/小时）</view>
+      <input class="field" type="digit" value="{{form.weekday}}" data-field="weekday" bindinput="input" />
+      <view class="label">周末价格（元/小时）</view>
+      <input class="field" type="digit" value="{{form.weekend}}" data-field="weekend" bindinput="input" />
+      <view class="label">生效时间</view>
+      <view class="seg">
+        <view class="seg-item {{form.mode === 'now' ? 'on' : ''}}" data-mode="now" bindtap="setMode">立即生效</view>
+        <view class="seg-item {{form.mode === 'date' ? 'on' : ''}}" data-mode="date" bindtap="setMode">指定日期生效</view>
+      </view>
+      <picker wx:if="{{form.mode === 'date'}}" mode="date" start="{{today}}" value="{{form.from}}" data-field="from" bindchange="input">
+        <view class="field">{{form.from || '选择生效日期'}}</view>
+      </picker>
+      <view class="muted note">已付款的订单价格不变；法定节假日、调休请用「单日价格」设置</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view wx:if="{{!cfg.daily.length}}" class="placeholder">暂无单日价格</view>
+    <view wx:for="{{cfg.daily}}" wx:key="_id" class="card">
+      <view class="row"><text class="card-title">{{item.dateText}}</text><text class="strong">{{item.priceText}}</text></view>
+      <view class="muted">{{item.timeText}} · {{item.courtText}}</view>
+      <view class="ops"><text data-index="{{index}}" bindtap="editDaily">编辑</text><text class="danger" data-index="{{index}}" bindtap="removeDaily">删除</text></view>
+    </view>
+    <view wx:if="{{cfg.expired.length}}" class="expired-toggle" bindtap="toggleExpired">已过期 {{cfg.expired.length}} 条 {{showExpired ? '▲' : '▼'}}</view>
+    <block wx:if="{{showExpired}}">
+      <view wx:for="{{cfg.expired}}" wx:key="_id" class="card expired">
+        <view class="row"><text>{{item.dateText}}</text><text>{{item.priceText}}</text></view>
+        <view class="muted">{{item.timeText}} · {{item.courtText}}</view>
+      </view>
+    </block>
+  </block>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar">
+  <button wx:if="{{tab === 'regular'}}" class="btn btn-primary" bindtap="saveRegular">保存常用价格</button>
+  <button wx:else class="btn btn-primary" bindtap="addDaily">+ 新增单日价格</button>
+</view>

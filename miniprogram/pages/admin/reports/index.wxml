@@ -1,0 +1,63 @@
+<admin-drawer current="reports" title="报表" />
+<view class="container">
+  <view class="seg">
+    <view class="seg-item {{mode === 'day' ? 'on' : ''}}" data-mode="day" bindtap="setMode">按日</view>
+    <view class="seg-item {{mode === 'month' ? 'on' : ''}}" data-mode="month" bindtap="setMode">按月</view>
+  </view>
+  <view class="range">
+    <block wx:if="{{mode === 'day'}}">
+      <picker mode="date" value="{{from}}" end="{{today}}" data-field="from" bindchange="pick"><view class="chip">{{from}}</view></picker>
+      <text>至</text>
+      <picker mode="date" value="{{to}}" end="{{today}}" data-field="to" bindchange="pick"><view class="chip">{{to}}</view></picker>
+    </block>
+    <block wx:else>
+      <picker mode="date" fields="month" value="{{fromMonth}}" data-field="fromMonth" bindchange="pick"><view class="chip">{{fromMonth}}</view></picker>
+      <text>至</text>
+      <picker mode="date" fields="month" value="{{toMonth}}" data-field="toMonth" bindchange="pick"><view class="chip">{{toMonth}}</view></picker>
+    </block>
+  </view>
+
+  <block wx:if="{{rep}}">
+    <view class="metrics">
+      <view class="metric"><view class="mlabel">收入</view><view class="mval">{{rep.total.income}}</view></view>
+      <view class="metric"><view class="mlabel">实收</view><view class="mval">{{rep.total.net}}</view></view>
+      <view class="metric"><view class="mlabel">场地收入</view><view class="mval sm">{{rep.total.court}}</view></view>
+      <view class="metric"><view class="mlabel">活动收入</view><view class="mval sm">{{rep.total.product}}</view></view>
+      <view class="metric"><view class="mlabel">退款</view><view class="mval sm danger">{{rep.total.refund}}</view></view>
+    </view>
+    <view class="muted note">收入按付款日、退款按退款日、使用率按打球日计算</view>
+
+    <view class="card">
+      <view class="card-title">明细</view>
+      <view class="trow th"><text>日期</text><text>场地</text><text>活动</text><text>退款</text><text>实收</text></view>
+      <view wx:if="{{!rep.rows.length}}" class="muted empty">没有数据</view>
+      <view wx:for="{{rep.rows}}" wx:key="period" class="trow"><text>{{item.period}}</text><text>{{item.court}}</text><text>{{item.product}}</text><text>{{item.refund}}</text><text>{{item.net}}</text></view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">场地使用率</view>
+      <view wx:for="{{rep.courts}}" wx:key="court" class="bar-row">
+        <text class="bar-label">{{item.court}}号场</text>
+        <view class="bar"><view class="bar-fill" style="width: {{item.rate}}%"></view></view>
+        <text class="bar-val">{{item.rate}}%</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">各时段使用率</view>
+      <view wx:for="{{rep.hours}}" wx:key="hour" class="bar-row">
+        <text class="bar-label">{{item.label}}</text>
+        <view class="bar"><view class="bar-fill" style="width: {{item.rate}}%"></view></view>
+        <text class="bar-val">{{item.rate}}%</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">热门时段排行</view>
+      <view wx:if="{{!rep.hot.length}}" class="muted empty">没有数据</view>
+      <view wx:for="{{rep.hot}}" wx:key="label" class="row hot"><text>{{index + 1}}. {{item.label}}</text><text>{{item.count}} 场次</text></view>
+    </view>
+  </block>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="exportExcel">导出 Excel</button></view>

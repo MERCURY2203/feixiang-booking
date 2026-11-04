@@ -1,0 +1,46 @@
+<view class="container">
+  <view wx:if="{{loaded && empty}}" class="placeholder">购物车是空的</view>
+
+  <view wx:if="{{invalidCount}}" class="tip row">
+    <text>有 {{invalidCount}} 项已失效，不计入合计</text>
+    <text class="link" bindtap="clearInvalid">清除失效项</text>
+  </view>
+
+  <view wx:if="{{courts.length}}" class="card">
+    <view class="card-title group">场地</view>
+    <view wx:for="{{courts}}" wx:key="label" class="line {{item.valid ? '' : 'invalid'}}">
+      <view class="main">
+        <view>{{item.label}}</view>
+        <view wx:if="{{!item.valid}}" class="reason">已失效 · {{item.reason}}</view>
+      </view>
+      <view class="price">{{item.valid ? item.priceText : ''}}</view>
+      <view class="del" data-index="{{index}}" bindtap="removeCourt">删除</view>
+    </view>
+  </view>
+
+  <view wx:if="{{products.length}}" class="card">
+    <view class="card-title group">活动</view>
+    <view wx:for="{{products}}" wx:key="productId" class="line {{item.valid ? '' : 'invalid'}}">
+      <view class="main">
+        <view>{{item.label}}</view>
+        <view class="muted">单价 {{item.priceText}}</view>
+        <view wx:if="{{!item.valid}}" class="reason">已失效 · {{item.reason}}</view>
+        <view wx:else class="stepper">
+          <view class="step" data-index="{{index}}" data-delta="-1" bindtap="changeQty">－</view>
+          <view class="qty">{{item.qty}}</view>
+          <view class="step" data-index="{{index}}" data-delta="1" bindtap="changeQty">＋</view>
+        </view>
+      </view>
+      <view class="price">{{item.valid ? item.subtotalText : ''}}</view>
+      <view class="del" data-index="{{index}}" bindtap="removeProduct">删除</view>
+    </view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar">
+  <view class="clear" bindtap="clearAll">清空</view>
+  <view class="sum">合计 <text class="total">{{totalText}}</text></view>
+  <button class="btn btn-primary go" disabled="{{!total}}" bindtap="goCheckout">去结算</button>
+</view>
+<phone-sheet id="phoneSheet" />

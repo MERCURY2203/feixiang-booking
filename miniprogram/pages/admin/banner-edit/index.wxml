@@ -1,0 +1,55 @@
+<view class="container">
+  <view class="card">
+    <view class="label">横幅图片（建议宽高比 5:2）</view>
+    <image wx:if="{{b.image}}" class="img" src="{{b.image}}" mode="aspectFill" bindtap="chooseImage" />
+    <view wx:else class="img add" bindtap="chooseImage">＋ 上传图片</view>
+  </view>
+
+  <view class="card">
+    <view class="label">点击后跳转到</view>
+    <picker range="{{targets}}" range-key="name" value="{{targetIndex}}" bindchange="pickTarget">
+      <view class="field">{{targets[targetIndex].name}}</view>
+    </picker>
+    <block wx:if="{{b.target.type === 'product'}}">
+      <view class="label">选择商品</view>
+      <picker range="{{products}}" range-key="name" value="{{productIndex}}" bindchange="pickProduct">
+        <view class="field">{{productIndex >= 0 ? products[productIndex].name : '选择商品'}}</view>
+      </picker>
+    </block>
+    <block wx:if="{{b.target.type === 'booking'}}">
+      <view class="label">选择日期</view>
+      <picker mode="date" value="{{b.target.date}}" bindchange="pickBookingDate">
+        <view class="field">{{b.target.date || '选择日期'}}</view>
+      </picker>
+    </block>
+  </view>
+
+  <view class="card">
+    <view class="label">显示方式</view>
+    <view class="seg">
+      <view class="seg-item {{b.mode === 'long' ? 'on' : ''}}" data-mode="long" bindtap="setMode">长期显示</view>
+      <view class="seg-item {{b.mode === 'timed' ? 'on' : ''}}" data-mode="timed" bindtap="setMode">限时显示</view>
+    </view>
+    <block wx:if="{{b.mode === 'timed'}}">
+      <view class="label">开始</view>
+      <view class="two">
+        <picker mode="date" value="{{b.startDate}}" data-field="startDate" bindchange="input"><view class="field">{{b.startDate || '日期'}}</view></picker>
+        <picker mode="time" value="{{b.startTime}}" data-field="startTime" bindchange="input"><view class="field">{{b.startTime}}</view></picker>
+      </view>
+      <view class="label">结束</view>
+      <view class="two">
+        <picker mode="date" value="{{b.endDate}}" data-field="endDate" bindchange="input"><view class="field">{{b.endDate || '日期'}}</view></picker>
+        <picker mode="time" value="{{b.endTime}}" data-field="endTime" bindchange="input"><view class="field">{{b.endTime}}</view></picker>
+      </view>
+      <view class="muted">到时自动上架、自动下架</view>
+    </block>
+    <view wx:else class="muted">一直显示，直到手动下架</view>
+  </view>
+
+  <view class="card row">
+    <text>上架</text>
+    <switch checked="{{b.enabled}}" color="#2B5AAE" bindchange="toggleEnabled" />
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="save">保存</button></view>

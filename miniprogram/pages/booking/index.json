@@ -1,1 +1,7 @@
-{ "navigationBarTitleText": "飞翔球馆" }
+{
+  "navigationBarTitleText": "飞翔球馆",
+  "usingComponents": {
+    "court-grid": "/components/court-grid/index",
+    "cart-fab": "/components/cart-fab/index"
+  }
+}

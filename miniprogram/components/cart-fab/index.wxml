@@ -1,0 +1,4 @@
+<view class="fab" bindtap="go">
+  <view class="icon">购物车</view>
+  <view wx:if="{{count > 0}}" class="badge">{{count > 99 ? '99+' : count}}</view>
+</view>

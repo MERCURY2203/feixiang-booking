@@ -1,4 +1,18 @@
-<view class="container">
-  <view class="placeholder">订场表格开发中（任务 T5–T6）</view>
-</view>
+<swiper wx:if="{{banners.length}}" class="banner" autoplay interval="10000" circular indicator-dots="{{banners.length > 1}}" indicator-active-color="#FFFFFF">
+  <swiper-item wx:for="{{banners}}" wx:key="_id" data-index="{{index}}" bindtap="onBannerTap">
+    <image class="banner-img" src="{{item.image}}" mode="aspectFill" />
+  </swiper-item>
+</swiper>
+
+<scroll-view class="dates" scroll-x enhanced show-scrollbar="{{false}}">
+  <view wx:for="{{days}}" wx:key="date" class="date {{item.date === date ? 'on' : ''}}" data-date="{{item.date}}" bindtap="pickDate">
+    <view class="d1">{{item.label}}</view>
+  </view>
+</scroll-view>
+
+<view class="grid-anchor"></view>
+<view wx:if="{{loaded && !days.length}}" class="placeholder">暂无可预订的日期</view>
+<court-grid wx:else courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" bind:celltap="onCellTap" />
+
+<cart-fab count="{{cartCount}}" />
 <privacy-modal />

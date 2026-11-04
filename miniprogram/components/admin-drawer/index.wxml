@@ -1,13 +1,17 @@
 <view class="topbar">
-  <view class="menu-btn" bindtap="toggle">☰</view>
+  <view class="menu-btn" bindtap="toggle">☰<view wx:if="{{badge > 0}}" class="dot"></view></view>
   <view class="topbar-title">{{title}}</view>
+  <slot name="right"></slot>
 </view>
 <view class="topbar-spacer"></view>
 
 <view wx:if="{{open}}" class="mask" bindtap="toggle" catchtouchmove="noop">
   <view class="drawer" catchtap="noop">
     <view class="drawer-head">飞翔球馆 · 管理后台</view>
-    <view wx:for="{{items}}" wx:key="key" class="drawer-item {{item.key === current ? 'on' : ''}}" data-index="{{index}}" bindtap="go">{{item.title}}</view>
+    <view wx:for="{{items}}" wx:key="key" class="drawer-item {{item.key === current ? 'on' : ''}}" data-index="{{index}}" bindtap="go">
+      <text>{{item.title}}</text>
+      <text wx:if="{{item.badge && badge > 0}}" class="count">{{badge > 99 ? '99+' : badge}}</text>
+    </view>
     <view class="drawer-item back" bindtap="backToCustomer">返回客人模式</view>
   </view>
 </view>

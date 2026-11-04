@@ -1,0 +1,3 @@
+.link { color: var(--primary); }
+.foot { margin-top: 8rpx; }
+.undo { color: var(--danger); font-weight: 600; }

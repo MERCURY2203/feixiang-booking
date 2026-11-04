@@ -1,0 +1,6 @@
+@import '../../app.wxss';
+.mask { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.5); display: flex; align-items: flex-end; }
+.panel { width: 100%; background: #FFFFFF; border-radius: 32rpx 32rpx 0 0; padding: 48rpx 40rpx calc(40rpx + env(safe-area-inset-bottom)); box-sizing: border-box; }
+.title { font-size: 38rpx; font-weight: 600; margin-bottom: 16rpx; }
+.desc { color: var(--text-2); font-size: 30rpx; margin-bottom: 40rpx; }
+.plain { text-align: center; color: var(--text-2); padding: 28rpx 0 0; font-size: 30rpx; }

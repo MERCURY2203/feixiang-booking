@@ -1,0 +1,39 @@
+<view wx:if="{{p}}">
+  <swiper class="gallery" indicator-dots="{{p.images.length > 1}}" circular>
+    <swiper-item wx:for="{{p.images}}" wx:key="*this">
+      <image class="gimg" src="{{item}}" mode="aspectFill" />
+    </swiper-item>
+  </swiper>
+  <view class="container">
+    <view class="card">
+      <view class="name">{{p.name}}</view>
+      <view class="row meta">
+        <text class="price">{{p.priceText}}</text>
+        <text class="muted">剩余 {{p.stock}}</text>
+      </view>
+      <view class="muted">{{p.validity}}</view>
+    </view>
+    <view class="card">
+      <view class="row">
+        <text>购买数量</text>
+        <view class="stepper">
+          <view class="step" data-delta="-1" bindtap="change">－</view>
+          <view class="qty">{{qty}}</view>
+          <view class="step" data-delta="1" bindtap="change">＋</view>
+        </view>
+      </view>
+    </view>
+    <view class="card">
+      <view class="card-title">活动说明</view>
+      <text class="desc">{{p.desc || '暂无说明'}}</text>
+    </view>
+    <view class="bottom-spacer"></view>
+  </view>
+
+  <view class="bottom-bar">
+    <view class="sub">{{subtotalText}}</view>
+    <button class="btn btn-primary" disabled="{{p.stock <= 0}}" bindtap="buyNow">立即购买</button>
+    <button class="btn btn-secondary" disabled="{{p.stock <= 0}}" bindtap="addCart">加入购物车</button>
+  </view>
+</view>
+<phone-sheet id="phoneSheet" />

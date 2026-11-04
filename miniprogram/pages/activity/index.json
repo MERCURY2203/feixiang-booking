@@ -1,1 +1,1 @@
-{ "navigationBarTitleText": "飞翔球馆" }
+{ "navigationBarTitleText": "活动", "usingComponents": { "cart-fab": "/components/cart-fab/index" } }

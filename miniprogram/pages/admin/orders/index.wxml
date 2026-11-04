@@ -1,0 +1,26 @@
+<admin-drawer current="orders" title="订单管理" />
+<view class="container">
+  <view class="search">
+    <input class="kw" placeholder="手机号后 4 位或订单号" value="{{keyword}}" bindinput="onKeyword" confirm-type="search" bindconfirm="search" />
+    <button class="btn btn-primary sbtn" bindtap="search">搜索</button>
+  </view>
+  <view class="filters">
+    <picker mode="date" value="{{date}}" bindchange="pickDate">
+      <view class="chip">{{date || '选择日期'}}</view>
+    </picker>
+    <view wx:if="{{date}}" class="chip clear" bindtap="clearDate">清除日期</view>
+  </view>
+  <view class="tabs">
+    <view wx:for="{{tabs}}" wx:key="key" class="tab {{item.key === tab ? 'on' : ''}}" data-key="{{item.key}}" bindtap="switchTab">{{item.name}}</view>
+  </view>
+
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">没有找到订单</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card" data-index="{{index}}" bindtap="open">
+    <view class="row">
+      <text class="muted">{{item.created}} · {{item.phone}}</text>
+      <text class="status">{{item.statusText}}</text>
+    </view>
+    <view class="summary">{{item.summary}}</view>
+    <view class="row"><text class="muted">{{item._id}}</text><text class="amount">{{item.totalText}}</text></view>
+  </view>
+</view>
