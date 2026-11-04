@@ -1,0 +1,15 @@
+{
+  "appid": "wxffe19c5443bb0f36",
+  "projectname": "feixiang-booking",
+  "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "compileType": "miniprogram",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true
+  },
+  "libVersion": "3.3.4"
+}

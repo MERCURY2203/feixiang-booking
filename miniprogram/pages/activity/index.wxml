@@ -1,0 +1,4 @@
+<view class="container">
+  <view class="placeholder">活动商品开发中（任务 T14）</view>
+</view>
+<privacy-modal />

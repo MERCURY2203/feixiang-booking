@@ -1,0 +1,23 @@
+<view wx:if="{{show}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <image class="logo" src="/images/logo.png" mode="aspectFit" />
+
+    <block wx:if="{{step === 'agree'}}">
+      <view class="title">欢迎使用飞翔球馆</view>
+      <view class="desc">为了给你提供订场、购买活动等服务，请阅读并同意以下协议。</view>
+      <view class="check" bindtap="toggle">
+        <view class="box {{checked ? 'on' : ''}}">{{checked ? '✓' : ''}}</view>
+        <view>我已阅读并同意<text class="link" catchtap="openDoc" data-type="agreement">《用户协议》</text>和<text class="link" catchtap="openDoc" data-type="privacy">《隐私政策》</text></view>
+      </view>
+      <button class="btn btn-primary full" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="onAgree">同意并继续</button>
+      <view class="plain" bindtap="onDisagree">不同意</view>
+    </block>
+
+    <block wx:else>
+      <view class="title">授权手机号</view>
+      <view class="desc">订场和购买时需要手机号，方便球馆与你联系。也可以先跳过，下单时再授权。</view>
+      <button class="btn btn-primary full" open-type="getPhoneNumber" bindgetphonenumber="onPhone">授权手机号</button>
+      <view class="plain" bindtap="close">暂不授权，先看看</view>
+    </block>
+  </view>
+</view>

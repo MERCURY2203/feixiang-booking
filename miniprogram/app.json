@@ -1,0 +1,33 @@
+{
+  "pages": [
+    "pages/booking/index",
+    "pages/activity/index",
+    "pages/me/index",
+    "pages/bind/index",
+    "pages/admin/home/index",
+    "pages/admin/staff/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#2B5AAE",
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "飞翔球馆",
+    "backgroundColor": "#F7F8FA"
+  },
+  "tabBar": {
+    "color": "#666666",
+    "selectedColor": "#2B5AAE",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/booking/index", "text": "订场" },
+      { "pagePath": "pages/activity/index", "text": "活动" },
+      { "pagePath": "pages/me/index", "text": "我的" }
+    ]
+  },
+  "usingComponents": {
+    "privacy-modal": "/components/privacy-modal/index"
+  },
+  "__usePrivacyCheck__": true,
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

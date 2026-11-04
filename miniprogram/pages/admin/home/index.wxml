@@ -1,0 +1,4 @@
+<admin-drawer current="verify" title="核销" />
+<view class="container">
+  <view class="placeholder">核销功能开发中（任务 T15）</view>
+</view>

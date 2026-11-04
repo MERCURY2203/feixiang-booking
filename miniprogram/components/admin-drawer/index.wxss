@@ -1,0 +1,11 @@
+@import '../../app.wxss';
+.topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 50; height: 96rpx; display: flex; align-items: center; background: #FFFFFF; border-bottom: 1rpx solid var(--border); }
+.menu-btn { width: 96rpx; height: 96rpx; line-height: 96rpx; text-align: center; font-size: 44rpx; color: var(--primary); }
+.topbar-title { font-size: 34rpx; font-weight: 600; }
+.topbar-spacer { height: 96rpx; }
+.mask { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, 0.4); }
+.drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 70%; background: #FFFFFF; padding-top: 24rpx; display: flex; flex-direction: column; }
+.drawer-head { padding: 24rpx 40rpx 32rpx; font-size: 32rpx; font-weight: 600; color: var(--primary); border-bottom: 1rpx solid var(--border); }
+.drawer-item { padding: 0 40rpx; height: 104rpx; line-height: 104rpx; font-size: 32rpx; }
+.drawer-item.on { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+.drawer-item.back { margin-top: auto; margin-bottom: env(safe-area-inset-bottom); border-top: 1rpx solid var(--border); color: var(--text-2); }

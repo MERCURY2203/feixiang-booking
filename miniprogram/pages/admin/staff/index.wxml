@@ -1,0 +1,29 @@
+<admin-drawer current="staff" title="员工管理" />
+<view class="container">
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">还没有员工，点击下方按钮邀请</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card">
+    <view class="row">
+      <view class="card-title">{{item.remark || item.nickname || '未命名员工'}}</view>
+      <view class="link" data-index="{{index}}" bindtap="editRemark">改备注</view>
+    </view>
+    <view class="muted">手机号：{{item.phone || '未授权'}}</view>
+    <view class="muted">加入时间：{{item.joinedText}}</view>
+    <view class="actions">
+      <view class="remove" data-index="{{index}}" bindtap="remove">移除</view>
+    </view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+
+<view class="bottom-bar">
+  <button class="btn btn-primary" bindtap="createInvite">+ 新增员工</button>
+</view>
+
+<view wx:if="{{invite}}" class="mask" catchtouchmove="noop">
+  <view class="panel">
+    <view class="card-title">请员工用微信扫码</view>
+    <image class="qr" src="{{invite.qrFileId}}" mode="aspectFit" show-menu-by-longpress />
+    <view class="muted center">{{leftText}}</view>
+    <button class="btn btn-secondary" bindtap="closeInvite">完成</button>
+  </view>
+</view>

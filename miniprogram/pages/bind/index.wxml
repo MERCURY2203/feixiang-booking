@@ -1,0 +1,8 @@
+<view class="container">
+  <view class="card result">
+    <view class="icon {{status}}">{{status === 'ok' ? '✓' : status === 'fail' ? '!' : '…'}}</view>
+    <view class="msg">{{message}}</view>
+    <button wx:if="{{status !== 'loading'}}" class="btn btn-primary" bindtap="goMe">前往「我的」</button>
+  </view>
+</view>
+<privacy-modal />

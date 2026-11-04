@@ -1,0 +1,14 @@
+.profile { display: flex; align-items: center; gap: 28rpx; }
+.avatar-btn { margin: 0; padding: 0; width: 128rpx; height: 128rpx; border-radius: 50%; background: none; line-height: normal; }
+.avatar-btn::after { border: none; }
+.avatar { width: 128rpx; height: 128rpx; border-radius: 50%; }
+.avatar.empty { background: var(--primary-light); color: var(--primary); font-size: 26rpx; display: flex; align-items: center; justify-content: center; }
+.info { flex: 1; min-width: 0; }
+.name { font-size: 36rpx; font-weight: 600; }
+.name-input { font-size: 36rpx; border-bottom: 2rpx solid var(--primary); padding: 8rpx 0; }
+.small { height: 64rpx; font-size: 28rpx; margin-top: 12rpx; display: inline-flex; }
+.menu { padding: 0 32rpx; }
+.menu-item { display: flex; justify-content: space-between; align-items: center; height: 108rpx; border-bottom: 1rpx solid var(--border); }
+.menu-item:last-child { border-bottom: none; }
+.arrow { color: var(--text-2); font-size: 40rpx; }
+.admin { color: var(--primary); font-weight: 600; }

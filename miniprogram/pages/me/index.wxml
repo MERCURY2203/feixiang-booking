@@ -1,0 +1,30 @@
+<view class="container">
+  <!-- 頂部個人資料 -->
+  <view class="card profile">
+    <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+      <image wx:if="{{user.avatar}}" class="avatar" src="{{user.avatar}}" mode="aspectFill" />
+      <view wx:else class="avatar empty">头像</view>
+    </button>
+    <view class="info">
+      <block wx:if="{{editingName}}">
+        <input class="name-input" type="nickname" focus value="{{user.nickname}}" placeholder="输入昵称" bindblur="onNicknameDone" bindconfirm="onNicknameDone" />
+      </block>
+      <block wx:else>
+        <view class="name" bindtap="startEditName">{{user.nickname || phoneMasked || '点击设置昵称'}}</view>
+        <view wx:if="{{user.nickname && phoneMasked}}" class="muted">{{phoneMasked}}</view>
+      </block>
+      <button wx:if="{{!user.phone}}" class="btn btn-secondary small" open-type="getPhoneNumber" bindgetphonenumber="onPhone">授权手机号</button>
+    </view>
+  </view>
+
+  <view class="card menu">
+    <view class="menu-item" bindtap="goOrders"><text>我的订单</text><text class="arrow">›</text></view>
+  </view>
+
+  <view class="card menu">
+    <view class="menu-item" bindtap="openDocs"><text>用户协议与隐私政策</text><text class="arrow">›</text></view>
+    <view class="menu-item" bindtap="cancelAccount"><text>注销账号</text><text class="arrow">›</text></view>
+    <view wx:if="{{isAdmin}}" class="menu-item admin" bindtap="goAdmin"><text>管理后台</text><text class="arrow">›</text></view>
+  </view>
+</view>
+<privacy-modal binduserchange="onUserChange" />

@@ -1,0 +1,5 @@
+.result { text-align: center; padding: 64rpx 32rpx; }
+.icon { width: 120rpx; height: 120rpx; margin: 0 auto 32rpx; border-radius: 50%; font-size: 64rpx; line-height: 120rpx; color: #FFFFFF; background: var(--disabled-text); }
+.icon.ok { background: var(--primary); }
+.icon.fail { background: var(--danger); }
+.msg { font-size: 34rpx; margin-bottom: 48rpx; }
