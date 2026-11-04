@@ -95,6 +95,7 @@ exports.main = async event => {
         if (pending.total || courts.total || coupons.total) return fail('你还有未使用的场地或券，请先使用或退款后再注销', 'HAS_ACTIVE')
         if (user.role !== 'customer') return fail('老板和员工请先由老板移除身份后再注销')
         await db.collection('orders').where({ userId: user._id }).update({ data: { phone: '', deletedUser: true } })
+        await db.collection('verify_logs').where({ userId: user._id }).update({ data: { phone: '' } })
         await users.doc(user._id).update({
           data: { openid: `deleted_${user._id}`, phone: '', nickname: '', avatar: '', deletedAt: now }
         })

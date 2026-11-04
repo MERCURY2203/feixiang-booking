@@ -5,7 +5,7 @@ const { now, beijingParts, pad } = require('../../../utils/time')
 
 Page({
   data: {
-    id: '', name: '', images: [], price: '', stock: '', desc: '', fixedDate: false,
+    id: '', name: '', images: [], price: '', stock: '', stockFrom: null, desc: '', fixedDate: false,
     activityDate: '', activityStartTime: '', onShelf: true, soldCount: 0, today: ''
   },
 
@@ -17,7 +17,7 @@ Page({
       .call('admin', 'productGet', { id: options.id })
       .then(p2 => {
         this.setData({
-          id: p2._id, name: p2.name, images: p2.images || [], price: (p2.price / 100).toFixed(2), stock: String(p2.stock),
+          id: p2._id, name: p2.name, images: p2.images || [], price: (p2.price / 100).toFixed(2), stock: String(p2.stock), stockFrom: p2.stock,
           desc: p2.desc || '', fixedDate: !!p2.fixedDate, activityDate: p2.activityDate || '',
           activityStartTime: p2.activityStartTime || '', onShelf: !!p2.onShelf, soldCount: p2.soldCount || 0
         })
@@ -72,7 +72,7 @@ Page({
     api
       .call('admin', 'productSave', {
         product: {
-          _id: d.id || undefined, name: d.name, images: d.images, price, stock: Number(d.stock), desc: d.desc,
+          _id: d.id || undefined, name: d.name, images: d.images, price, stock: Number(d.stock), stockFrom: d.id ? d.stockFrom : undefined, desc: d.desc,
           fixedDate: d.fixedDate, activityDate: d.activityDate, activityStartTime: d.activityStartTime, onShelf: d.onShelf
         }
       })

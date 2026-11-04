@@ -56,28 +56,54 @@ async function schedule(date) {
   return result
 }
 
+// ---------- 購物車項目檢查：只接受合法的場地號、整點、日期和正整數數量 ----------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const MAX_QUOTE = 200 // 購物車報價一次最多 200 項
+const MAX_CHECKOUT = 40 // 一張訂單最多 40 項（數據庫事務的操作上限）
+
+function cleanItem(i) {
+  if (!i || typeof i !== 'object') return null
+  if (i.type === 'court') {
+    const court = Number(i.court)
+    const hour = Number(i.hour)
+    if (typeof i.date !== 'string' || !DATE_RE.test(i.date)) return null
+    if (!Number.isInteger(court) || !u.COURTS.includes(court)) return null
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
+    return { type: 'court', date: i.date, court, hour }
+  }
+  if (i.type === 'product') {
+    const qty = i.qty === undefined ? 1 : Number(i.qty)
+    if (typeof i.productId !== 'string' || !i.productId || i.productId.length > 64) return null
+    if (!Number.isInteger(qty) || qty < 1 || qty > 99) return null
+    return { type: 'product', productId: i.productId, qty }
+  }
+  return null
+}
+
+async function loadByIds(coll, ids) {
+  const map = {}
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await db.collection(coll).where({ _id: _.in(ids.slice(i, i + 100)) }).limit(100).get()
+    res.data.forEach(d => (map[d._id] = d))
+  }
+  return map
+}
+
 // ---------- 購物車報價：檢查每項是否仍有效、取得最新價格 ----------
 
-async function quote(items) {
+async function quote(rawItems) {
   const now = Date.now()
   const cfg = await cal.loadConfig(db)
   const days = cal.bookableDays(cfg, now)
-  const courtItems = items.filter(i => i.type === 'court')
-  const productIds = [...new Set(items.filter(i => i.type === 'product').map(i => i.productId))]
+  const items = rawItems.map(r => ({ raw: r, it: cleanItem(r) }))
+  const courtItems = items.filter(x => x.it && x.it.type === 'court').map(x => x.it)
+  const productIds = [...new Set(items.filter(x => x.it && x.it.type === 'product').map(x => x.it.productId))]
+  const locks = await loadByIds('slot_locks', courtItems.map(i => u.slotId(i.date, i.court, i.hour)))
+  const products = await loadByIds('products', productIds)
 
-  const lockIds = courtItems.map(i => u.slotId(i.date, i.court, i.hour))
-  const locks = {}
-  for (let i = 0; i < lockIds.length; i += 100) {
-    const res = await db.collection('slot_locks').where({ _id: _.in(lockIds.slice(i, i + 100)) }).get()
-    res.data.forEach(l => (locks[l._id] = l))
-  }
-  const products = {}
-  if (productIds.length) {
-    const res = await db.collection('products').where({ _id: _.in(productIds) }).get()
-    res.data.forEach(p => (products[p._id] = p))
-  }
-
-  return items.map(i => {
+  return items.map(({ raw, it: i }) => {
+    if (!i) return { ...(raw && typeof raw === 'object' ? raw : {}), qty: 1, valid: false, reason: '已失效', price: 0, label: '无效项目' }
     if (i.type === 'court') {
       const h = cal.hoursFor(cfg, i.date)
       const base = { ...i, label: `${u.dateLabel(i.date)} ${i.court}号场 ${u.hourRange(i.hour)}`, qty: 1 }
@@ -90,7 +116,7 @@ async function quote(items) {
       return { ...base, valid: true, price }
     }
     const p = products[i.productId]
-    const qty = Math.max(1, Math.floor(i.qty || 1))
+    const qty = i.qty
     if (!p) return { ...i, qty, valid: false, reason: '已下架', price: 0, label: '商品已删除' }
     const base = { ...i, qty, label: p.name, price: p.price, image: (p.images || [])[0] || '', stock: p.stock }
     if (!p.onShelf) return { ...base, valid: false, reason: '已下架' }
@@ -102,52 +128,48 @@ async function quote(items) {
 
 // ---------- 下單 ----------
 
-async function uniqueCode() {
-  for (let i = 0; i < 20; i++) {
-    const code = u.randomDigits(6)
-    const res = await db.collection('order_items').where({ code, codeActive: true }).count()
-    if (!res.total) return code
-  }
-  throw new Error('生成券码失败')
+// 券碼：6 位數字，在事務裡用 coupon_codes/{券碼} 佔位保證不重複
+function newCodes(n) {
+  const set = new Set()
+  while (set.size < n) set.add(u.randomDigits(6))
+  return [...set]
 }
 
 async function checkout(user, rawItems) {
   if (!user.phone) return u.fail('必须授权手机号才可下单购买哦', 'NEED_PHONE')
   if (!Array.isArray(rawItems) || !rawItems.length) return u.fail('购物车是空的')
 
-  // 同一客人同時只能有一張待支付訂單（澄清 C1）
-  const pend = await db.collection('orders').where({ userId: user._id, status: 'pending' }).get()
+  // 檢查並去重
+  const seen = new Set()
+  const items = []
+  for (const raw of rawItems) {
+    const i = cleanItem(raw)
+    if (!i) return u.fail('购物车里有无效项目，请刷新后重试', 'INVALID_ITEMS', { invalid: [] })
+    const key = i.type === 'court' ? `c_${i.date}_${i.court}_${i.hour}` : `p_${i.productId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    items.push(i)
+  }
+  if (items.length > MAX_CHECKOUT) return u.fail(`一次最多结算 ${MAX_CHECKOUT} 项，请分开下单`)
+
+  // 同一客人同時只能有一張待支付訂單（澄清 C1）：先處理已到期的，事務裡再用 user_pending 確認
+  const pend = await db.collection('orders').where({ userId: user._id, status: 'pending' }).limit(10).get()
   for (const o of pend.data) {
     const s = await ord.settle(cloud, db, o)
     if (s.status === 'pending') return u.fail('你有一笔待支付订单', 'HAS_PENDING', { orderId: o._id })
   }
 
-  // 去重
-  const seen = new Set()
-  const items = []
-  for (const i of rawItems) {
-    const key = i.type === 'court' ? `c_${i.date}_${i.court}_${i.hour}` : `p_${i.productId}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    items.push(i.type === 'court' ? { type: 'court', date: i.date, court: +i.court, hour: +i.hour } : { type: 'product', productId: i.productId, qty: +i.qty || 1 })
-  }
-
-  let q = await quote(items)
   // 已過期的待支付佔用：先向微信查單並關單，確認沒付款才能交給新客人
   const now = Date.now()
-  const stale = await db.collection('slot_locks').where({
-    _id: _.in(items.filter(i => i.type === 'court').map(i => u.slotId(i.date, i.court, i.hour)).slice(0, 100)),
-    status: 'pending',
-    expiresAt: _.lt(now)
-  }).get()
-  if (stale.data.length) {
-    for (const orderId of [...new Set(stale.data.map(l => l.orderId))]) {
-      const o = (await db.collection('orders').doc(orderId).get().catch(() => ({ data: null }))).data
-      if (o) await ord.settle(cloud, db, o)
-      else await db.collection('slot_locks').where({ orderId }).remove()
-    }
-    q = await quote(items)
+  const lockIds = items.filter(i => i.type === 'court').map(i => u.slotId(i.date, i.court, i.hour))
+  const locks = await loadByIds('slot_locks', lockIds)
+  const staleOrders = [...new Set(Object.values(locks).filter(l => l.status === 'pending' && l.expiresAt < now).map(l => l.orderId))]
+  for (const orderId of staleOrders) {
+    const o = await ord.dget(db, 'orders', orderId)
+    if (o) await ord.settle(cloud, db, o)
   }
+
+  const q = await quote(items)
   const invalid = q.filter(i => !i.valid)
   if (invalid.length) return u.fail(invalid[0].reason === '已被预订' ? '部分场次已被预订' : '部分商品不可购买', 'INVALID_ITEMS', { invalid })
 
@@ -158,77 +180,97 @@ async function checkout(user, rawItems) {
     openid: user.openid,
     phone: user.phone,
     status: 'pending',
-    totalFee: q.reduce((s, i) => s + i.price * i.qty, 0),
+    totalFee: 0,
     createdAt: created,
     expiresAt: created + PENDING_MS,
     hasCourt: q.some(i => i.type === 'court'),
     refundedFee: 0,
     refundCount: 0,
+    itemIds: [],
     summary: q.map(i => (i.type === 'court' ? `${u.cnDate(i.date)} ${u.hourRange(i.hour)} ${i.court}号场` : `${i.label} ×${i.qty}`)).join('；')
   }
-  if (order.totalFee <= 0) return u.fail('订单金额有误')
-
-  const productDocs = {}
-  for (const i of q.filter(x => x.type === 'product')) {
-    productDocs[i.productId] = (await db.collection('products').doc(i.productId).get()).data
-  }
-  const itemDocs = []
-  for (const i of q) {
+  // 卡片價格取自同一次報價；訂單總額 = 卡片金額相加，保證兩者永遠一致
+  const itemDocs = q.map((i, n) => {
+    const _id = `${order._id}_${n + 1}`
     if (i.type === 'court') {
-      itemDocs.push({
-        _id: `${order._id}_${itemDocs.length + 1}`, orderId: order._id, userId: user._id, kind: 'court',
+      return {
+        _id, orderId: order._id, userId: user._id, kind: 'court',
         date: i.date, court: i.court, hour: i.hour, startAt: u.slotStart(i.date, i.hour),
         price: i.price, qty: 1, refundedFee: 0, status: 'pending'
+      }
+    }
+    return {
+      _id, orderId: order._id, userId: user._id, kind: 'product', productId: i.productId, name: i.label, image: i.image,
+      price: i.price, qty: i.qty, verifiedQty: 0, refundedQty: 0, expiredQty: 0, refundedFee: 0, status: 'pending',
+      code: '', codeActive: true
+    }
+  })
+  order.itemIds = itemDocs.map(i => i._id)
+  order.totalFee = itemDocs.reduce((s, i) => s + i.price * i.qty, 0)
+  if (!(order.totalFee > 0)) return u.fail('订单金额有误')
+
+  // 事務：待支付名額 + 所有格子「申請車位牌」+ 扣庫存 + 券碼佔位，有一項不成立就整單不成立（技術方案「關鍵機制 1」）
+  let lastErr = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const products = itemDocs.filter(x => x.kind === 'product')
+    const codes = newCodes(products.length)
+    products.forEach((it, n) => (it.code = codes[n]))
+    try {
+      await ord.tx(db, async t => {
+        // ---- 先讀 ----
+        const claim = await ord.tget(t, 'user_pending', user._id)
+        if (claim && claim.orderId) {
+          const prev = await ord.tget(t, 'orders', claim.orderId)
+          if (prev && prev.status === 'pending') return ord.rollbackWith(t, 'HAS_PENDING', '你有一笔待支付订单', { orderId: prev._id })
+        }
+        for (const it of itemDocs.filter(x => x.kind === 'court')) {
+          if (await ord.tget(t, 'slot_locks', u.slotId(it.date, it.court, it.hour))) {
+            return ord.rollbackWith(t, 'INVALID_ITEMS', '部分场次已被预订')
+          }
+        }
+        const prodDocs = {}
+        for (const it of products) {
+          const p = await ord.tget(t, 'products', it.productId)
+          if (!p || !p.onShelf || p.stock < it.qty || (p.fixedDate && p.activityStartAt <= Date.now())) {
+            return ord.rollbackWith(t, 'INVALID_ITEMS', '部分商品不可购买')
+          }
+          if (p.price !== it.price) return ord.rollbackWith(t, 'INVALID_ITEMS', '价格已变动，请重新确认')
+          prodDocs[it.productId] = p
+          if (await ord.tget(t, 'coupon_codes', it.code)) return ord.rollbackWith(t, 'CODE_TAKEN', '券码冲突')
+        }
+
+        // ---- 再寫 ----
+        await t.collection('user_pending').doc(user._id).set({ data: { orderId: order._id, at: created } })
+        for (const it of itemDocs) {
+          if (it.kind === 'court') {
+            await t.collection('slot_locks').doc(u.slotId(it.date, it.court, it.hour)).set({
+              data: { date: it.date, court: it.court, hour: it.hour, status: 'pending', orderId: order._id, expiresAt: order.expiresAt }
+            })
+          } else {
+            const p = prodDocs[it.productId]
+            it.fixedDate = !!p.fixedDate
+            it.activityDate = p.activityDate || ''
+            it.activityStartAt = p.activityStartAt || 0
+            await t.collection('products').doc(p._id).update({ data: { stock: p.stock - it.qty, soldCount: (p.soldCount || 0) + it.qty } })
+            await t.collection('coupon_codes').doc(it.code).set({ data: { itemId: it._id, orderId: order._id, at: created } })
+          }
+          const { _id, ...data } = it
+          await t.collection('order_items').doc(_id).set({ data })
+        }
+        const { _id, ...orderData } = order
+        await t.collection('orders').doc(_id).set({ data: orderData })
       })
-    } else {
-      const p = productDocs[i.productId]
-      itemDocs.push({
-        _id: `${order._id}_${itemDocs.length + 1}`, orderId: order._id, userId: user._id, kind: 'product',
-        productId: p._id, name: p.name, image: (p.images || [])[0] || '', price: p.price, qty: i.qty,
-        fixedDate: !!p.fixedDate, activityDate: p.activityDate || '', activityStartAt: p.activityStartAt || 0,
-        verifiedQty: 0, refundedQty: 0, expiredQty: 0, refundedFee: 0, status: 'pending',
-        code: await uniqueCode(), codeActive: true
-      })
+      lastErr = null
+      break
+    } catch (e) {
+      lastErr = e
+      if (e.code === 'CODE_TAKEN') continue
+      if (e.business) return u.fail(e.message, e.code === 'HAS_PENDING' ? 'HAS_PENDING' : 'INVALID_ITEMS', { orderId: e.orderId, invalid: [] })
+      console.error('checkout tx', e)
+      return u.fail('下单失败，请重试')
     }
   }
-
-  // 事務：所有格子「申請車位牌」+ 扣庫存，有一項不成立就整單不成立（技術方案「關鍵機制 1」）
-  try {
-    await db.runTransaction(async t => {
-      const conflicts = []
-      for (const it of itemDocs.filter(x => x.kind === 'court')) {
-        const id = u.slotId(it.date, it.court, it.hour)
-        let exists = null
-        try {
-          exists = (await t.collection('slot_locks').doc(id).get()).data
-        } catch (e) {
-          exists = null
-        }
-        if (exists) conflicts.push(id)
-      }
-      for (const it of itemDocs.filter(x => x.kind === 'product')) {
-        const p = (await t.collection('products').doc(it.productId).get()).data
-        if (!p.onShelf || p.stock < it.qty) conflicts.push(it.productId)
-      }
-      if (conflicts.length) return t.rollback({ conflicts })
-
-      for (const it of itemDocs) {
-        if (it.kind === 'court') {
-          await t.collection('slot_locks').doc(u.slotId(it.date, it.court, it.hour)).set({
-            data: { date: it.date, court: it.court, hour: it.hour, status: 'pending', orderId: order._id, expiresAt: order.expiresAt }
-          })
-        } else {
-          await t.collection('products').doc(it.productId).update({ data: { stock: _.inc(-it.qty), soldCount: _.inc(it.qty) } })
-        }
-        await t.collection('order_items').doc(it._id).set({ data: it })
-      }
-      await t.collection('orders').doc(order._id).set({ data: order })
-    })
-  } catch (e) {
-    if (e && e.conflicts) return u.fail('部分场次已被预订', 'INVALID_ITEMS', { invalid: [] })
-    console.error('checkout tx', e)
-    return u.fail('下单失败，请重试')
-  }
+  if (lastErr) return u.fail('下单失败，请重试')
 
   // 向微信支付下單（有效期 5 分鐘）
   let payment
@@ -237,9 +279,8 @@ async function checkout(user, rawItems) {
     await db.collection('orders').doc(order._id).update({ data: { payment } })
   } catch (e) {
     console.error('unifiedOrder', e)
-    await ord.releaseHolds(db, order, itemDocs)
-    await db.collection('orders').doc(order._id).update({ data: { status: 'cancelled', cancelledAt: Date.now() } })
-    return u.fail('发起支付失败，请重试')
+    await ord.closePending(db, order._id, 'cancelled')
+    return u.fail(/未配置/.test(e.message) ? e.message : '发起支付失败，请重试')
   }
   return u.ok({ orderId: order._id, payment, mock: pay.MOCK, expiresAt: order.expiresAt, serverNow: Date.now() })
 }
@@ -287,6 +328,7 @@ const STATUS_TEXT = {
 }
 
 function statusText(order) {
+  if (order.status === 'timeout_refunded' && order.refundState !== 'success') return '超时退款处理中'
   if ((order.status === 'active' || order.status === 'completed') && order.refundedFee > 0) {
     return `${STATUS_TEXT[order.status]} · 部分退款`
   }
@@ -352,7 +394,9 @@ exports.main = async event => {
       case 'banners':
         return u.ok(await activeBanners(Date.now()))
       case 'quote':
-        return u.ok(await quote(Array.isArray(event.items) ? event.items.slice(0, 200) : []))
+        if (!Array.isArray(event.items)) return u.ok([])
+        if (event.items.length > MAX_QUOTE) return u.fail(`购物车最多 ${MAX_QUOTE} 项，请先删除一些`)
+        return u.ok(await quote(event.items))
       case 'products': {
         const res = await db.collection('products').where({ onShelf: true }).orderBy('sort', 'asc').orderBy('createdAt', 'desc').limit(100).get()
         const now = Date.now()
@@ -387,8 +431,8 @@ exports.main = async event => {
         if (o.status === 'pending') o = await ord.settle(cloud, db, o)
         if (o.status === 'pending' && event.check && !pay.MOCK) {
           // 付款後客人端主動查單，不必等微信通知
-          const q = await pay.queryOrder(cloud, o).catch(() => ({ paid: false }))
-          if (q.paid) o = await ord.markPaid(cloud, db, o, q.payTime)
+          const paid = await ord.confirmIfPaid(cloud, db, o).catch(() => null)
+          if (paid) o = paid
         }
         return u.ok({ ...orderView(o), serverNow: Date.now() })
       }
@@ -415,9 +459,10 @@ exports.main = async event => {
         if (!pay.MOCK) return u.fail('无权限', 'FORBIDDEN')
         const o = await loadOwnOrder(user, event.orderId)
         if (!o) return u.fail('订单不存在')
+        if (o.status !== 'pending' || o.expiresAt <= Date.now()) return u.fail('订单已关闭', 'CLOSED')
         const paidAt = Date.now()
         await db.collection('orders').doc(o._id).update({ data: { mockPaidAt: paidAt } })
-        const r = await ord.markPaid(cloud, db, { ...o, mockPaidAt: paidAt }, paidAt)
+        const r = (await ord.confirmIfPaid(cloud, db, { ...o, mockPaidAt: paidAt })) || o
         return u.ok(orderView(r))
       }
 
@@ -449,7 +494,7 @@ exports.main = async event => {
           amount = Math.min(qty * it.price, view.refundable)
         }
         const r = await ord.refundItems(cloud, db, { order: o, parts: [{ itemId: it._id, qty, amount }], operatorId: user._id, by: 'customer', reason: '' })
-        return u.ok({ amount: r.amount })
+        return u.ok({ amount: r.amount, processing: r.processing })
       }
 
       case 'couponQr': {

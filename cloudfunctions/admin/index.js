@@ -24,6 +24,7 @@ const STATUS_TEXT = {
   completed: '已完成', refunded: '已退款', timeout_refunded: '超时已退款'
 }
 function statusText(o) {
+  if (o.status === 'timeout_refunded' && o.refundState !== 'success') return o.refundState === 'failed' ? '超时退款失败·请人工处理' : '超时退款处理中'
   const base = STATUS_TEXT[o.status] || o.status
   return (o.status === 'active' || o.status === 'completed') && o.refundedFee > 0 ? `${base} · 部分退款` : base
 }
@@ -35,39 +36,59 @@ function hm(ts) {
 
 // ======================= 核銷 =======================
 
+// 用券碼找卡片：coupon_codes/{券碼} 保證一個券碼只對應一張卡片
+async function findCoupon(code) {
+  code = String(code || '').trim()
+  if (!/^\d{6}$/.test(code)) return null
+  const c = await ord.dget(db, 'coupon_codes', code)
+  if (c) return ord.dget(db, 'order_items', c.itemId)
+  // 兼容：舊數據沒有 coupon_codes 記錄
+  const res = await db.collection('order_items').where({ code, codeActive: true }).limit(1).get()
+  return res.data[0] || null
+}
+
 async function verifyLookup(code) {
-  const res = await db.collection('order_items').where({ code: String(code || '').trim(), codeActive: true }).limit(1).get()
-  const it = res.data[0]
-  if (!it) return u.fail('券码已失效')
+  const it = await findCoupon(code)
+  if (!it || it.kind !== 'product' || !it.codeActive) return u.fail('券码已失效')
+  if (ord.productExpired(it, Date.now())) return u.fail('券码已过期')
   const available = ord.productAvailable(it)
-  if (available <= 0) return u.fail('券码已失效')
-  const order = (await db.collection('orders').doc(it.orderId).get()).data
-  if (!['active', 'completed'].includes(order.status)) return u.fail('该订单状态不能核销')
+  if (available <= 0) return u.fail(it.refunding ? '该券正在退款中' : '券码已失效')
+  const order = await ord.dget(db, 'orders', it.orderId)
+  if (!order || !['active', 'completed'].includes(order.status)) return u.fail('该订单未付款或已关闭，不能核销')
   return u.ok({ itemId: it._id, name: it.name, phone: u.maskPhone(order.phone), available, code: it.code })
 }
 
+// 核銷（事務）：重新讀取卡片和訂單，確認已付款、未過期、張數足夠（退款處理中的張數不算可用）
 async function verifyConfirm(user, itemId, qty) {
-  qty = Math.floor(qty)
-  if (!(qty >= 1)) return u.fail('请选择核销张数')
-  const result = await db.runTransaction(async t => {
-    const it = (await t.collection('order_items').doc(itemId).get()).data
-    const available = ord.productAvailable(it)
-    if (!it.codeActive || available <= 0) return { error: '券码已失效' }
-    if (qty > available) return { error: `最多可核销 ${available} 张` }
-    const left = available - qty
-    await t.collection('order_items').doc(itemId).update({ data: { verifiedQty: (it.verifiedQty || 0) + qty, codeActive: left > 0 } })
-    return { it, left }
-  })
-  if (result.error) return u.fail(result.error)
-  const order = (await db.collection('orders').doc(result.it.orderId).get()).data
+  qty = Number(qty)
+  if (!Number.isInteger(qty) || qty < 1) return u.fail('请选择核销张数')
+  let result
+  try {
+    result = await ord.tx(db, async t => {
+      const it = await ord.tget(t, 'order_items', String(itemId || ''))
+      if (!it || it.kind !== 'product') return ord.rollbackWith(t, 'BAD', '券码已失效')
+      const order = await ord.tget(t, 'orders', it.orderId)
+      if (!order || !['active', 'completed'].includes(order.status)) return ord.rollbackWith(t, 'BAD', '该订单未付款或已关闭，不能核销')
+      if (ord.productExpired(it, Date.now())) return ord.rollbackWith(t, 'BAD', '券码已过期')
+      const available = ord.productAvailable(it)
+      if (!it.codeActive || available <= 0) return ord.rollbackWith(t, 'BAD', '券码已失效')
+      if (qty > available) return ord.rollbackWith(t, 'BAD', `最多可核销 ${available} 张`)
+      const left = available - qty
+      await t.collection('order_items').doc(it._id).update({ data: { verifiedQty: (it.verifiedQty || 0) + qty, codeActive: left > 0 || !!it.refunding } })
+      return { it, order, left }
+    })
+  } catch (e) {
+    if (e.business) return u.fail(e.message)
+    throw e
+  }
   const now = Date.now()
   await db.collection('verify_logs').add({
     data: {
-      type: 'verify', itemId, orderId: order._id, name: result.it.name, qty, phone: order.phone,
-      operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
+      type: 'verify', itemId: result.it._id, orderId: result.order._id, userId: result.order.userId, name: result.it.name, qty,
+      phone: result.order.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
     }
   })
-  await ord.refreshStatus(db, order._id)
+  await ord.refreshStatus(db, result.order._id)
   return u.ok({ left: result.left })
 }
 
@@ -87,21 +108,29 @@ async function verifyLogs(day) {
 
 async function verifyUndo(user, logId) {
   const today = u.dateStr(Date.now())
-  const result = await db.runTransaction(async t => {
-    const log = (await t.collection('verify_logs').doc(logId).get()).data
-    if (!log || log.type !== 'verify' || log.undone) return { error: '该记录不能撤销' }
-    if (log.day !== today) return { error: '只能撤销当天的核销记录' }
-    const it = (await t.collection('order_items').doc(log.itemId).get()).data
-    const stillValid = !it.fixedDate || u.dateStr(it.activityStartAt) >= today
-    await t.collection('order_items').doc(log.itemId).update({ data: { verifiedQty: (it.verifiedQty || 0) - log.qty, codeActive: stillValid } })
-    await t.collection('verify_logs').doc(logId).update({ data: { undone: true, undoneBy: user._id, undoneAt: Date.now() } })
-    return { log }
-  })
-  if (result.error) return u.fail(result.error)
+  let result
+  try {
+    result = await ord.tx(db, async t => {
+      const log = await ord.tget(t, 'verify_logs', String(logId || ''))
+      if (!log || log.type !== 'verify' || log.undone) return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
+      if (log.day !== today) return ord.rollbackWith(t, 'BAD', '只能撤销当天的核销记录')
+      const it = await ord.tget(t, 'order_items', log.itemId)
+      if (!it) return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
+      const order = await ord.tget(t, 'orders', it.orderId)
+      const paid = order && ['active', 'completed'].includes(order.status)
+      const stillValid = paid && !ord.productExpired(it, Date.now())
+      await t.collection('order_items').doc(log.itemId).update({ data: { verifiedQty: Math.max(0, (it.verifiedQty || 0) - log.qty), codeActive: stillValid } })
+      await t.collection('verify_logs').doc(log._id).update({ data: { undone: true, undoneBy: user._id, undoneAt: Date.now() } })
+      return { log }
+    })
+  } catch (e) {
+    if (e.business) return u.fail(e.message)
+    throw e
+  }
   const now = Date.now()
   await db.collection('verify_logs').add({
     data: {
-      type: 'undo', itemId: result.log.itemId, orderId: result.log.orderId, name: result.log.name, qty: result.log.qty,
+      type: 'undo', itemId: result.log.itemId, orderId: result.log.orderId, userId: result.log.userId || '', name: result.log.name, qty: result.log.qty,
       phone: result.log.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
     }
   })
@@ -125,7 +154,7 @@ async function adminOrders({ keyword, date, tab, skip }) {
   return u.ok({
     list: res.data.map(o => ({
       _id: o._id, created: `${u.dateStr(o.createdAt).slice(5)} ${hm(o.createdAt)}`, summary: o.summary,
-      totalFee: o.totalFee, statusText: statusText(o), phone: o.deletedUser ? '已注销用户' : u.maskPhone(o.phone)
+      totalFee: o.totalFee, statusText: statusText(o), phone: o.deletedUser || o.phonePurged ? '已注销用户' : u.maskPhone(o.phone)
     })),
     more: res.data.length === 20
   })
@@ -157,7 +186,7 @@ async function adminOrderDetail(orderId) {
   const order = (await db.collection('orders').doc(orderId).get().catch(() => ({ data: null }))).data
   if (!order) return u.fail('订单不存在')
   const items = (await ord.getItems(db, orderId)).sort((a, b) => (a._id < b._id ? -1 : 1))
-  const refunds = await db.collection('refunds').where({ orderId, status: 'success' }).orderBy('at', 'asc').get()
+  const refunds = await db.collection('refunds').where({ orderId, status: _.in(['success', 'pending', 'unknown']) }).orderBy('at', 'asc').get()
   const operators = {}
   for (const r of refunds.data) {
     if (r.operatorId && !operators[r.operatorId]) {
@@ -171,13 +200,14 @@ async function adminOrderDetail(orderId) {
     order: {
       _id: order._id, statusText: statusText(order), totalFee: order.totalFee, refundedFee: order.refundedFee || 0,
       created: `${u.dateStr(order.createdAt)} ${hm(order.createdAt)}`,
-      phone: order.deletedUser ? '已注销用户' : u.maskPhone(order.phone), hasPhone: !!order.phone && !order.deletedUser,
+      phone: order.deletedUser || order.phonePurged ? '已注销用户' : u.maskPhone(order.phone), hasPhone: !!order.phone && !order.deletedUser,
       refundWarn: (order.refundCount || 0) >= 45 ? `此订单剩余退款次数 ${left} 次，请合并退款` : ''
     },
     items: items.map(it => adminItemView(order, it, now)),
     refunds: refunds.data.map(r => ({
       time: `${u.dateStr(r.at).slice(5)} ${hm(r.at)}`, amount: r.amount,
-      by: r.by === 'system' ? '系统' : operators[r.operatorId] || (r.by === 'customer' ? '客人' : ''), reason: r.reason || ''
+      by: r.by === 'system' ? '系统' : operators[r.operatorId] || (r.by === 'customer' ? '客人' : ''),
+      reason: (r.status === 'success' ? '' : '处理中 ') + (r.reason || '')
     }))
   })
 }
@@ -200,13 +230,20 @@ async function adminRefund(user, orderId, parts) {
     if (!it) return u.fail('退款项目不存在')
     const amount = Math.round(p.amount)
     if (!(amount > 0)) return u.fail('退款金额必须大于 0')
-    let qty = it.kind === 'court' ? 1 : Math.max(0, Math.floor(p.qty || 0))
+    const qty = it.kind === 'court' ? 1 : Math.floor(Number(p.qty) || 0)
+    if (!(qty >= 0)) return u.fail('退款张数有误')
     if (it.kind === 'product' && qty > ord.productAvailable(it)) return u.fail('退款张数超过未使用张数')
     clean.push({ itemId: it._id, qty, amount })
   }
-  const r = await ord.refundItems(cloud, db, { order, parts: clean, operatorId: user._id, by: 'admin', reason: '' })
+  let r
+  try {
+    r = await ord.refundItems(cloud, db, { order, parts: clean, operatorId: user._id, by: 'admin', reason: '' })
+  } catch (e) {
+    if (e.business) return u.fail(e.message)
+    throw e
+  }
   await audit(user, 'refund', { orderId, amount: r.amount })
-  return u.ok({ amount: r.amount })
+  return u.ok({ amount: r.amount, processing: r.processing })
 }
 
 // ======================= 場地管理（鎖場） =======================
@@ -235,6 +272,8 @@ async function courtSchedule(date) {
 
 async function setLocks(user, date, cells, lock) {
   if (!Array.isArray(cells) || !cells.length) return u.fail('请先选择格子')
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return u.fail('日期有误')
+  if (cells.some(c => !c || !u.COURTS.includes(Number(c.court)) || !Number.isInteger(Number(c.hour)) || c.hour < 0 || c.hour > 23)) return u.fail('格子有误')
   const now = Date.now()
   const failed = []
   for (const c of cells) {
@@ -245,12 +284,7 @@ async function setLocks(user, date, cells, lock) {
     }
     if (lock) {
       const r = await db.runTransaction(async t => {
-        let l = null
-        try {
-          l = (await t.collection('slot_locks').doc(id).get()).data
-        } catch (e) {
-          l = null
-        }
+        const l = await ord.tget(t, 'slot_locks', id)
         if (l && l.status === 'locked') return null
         if (l && l.status === 'booked') return '该时段已有订单，请先退款再锁定'
         if (l && l.status === 'pending') return '该时段有待支付订单，请稍后再试'
@@ -296,11 +330,11 @@ async function productSave(user, p) {
   if (!name) return u.fail('请填写商品名称')
   const price = Math.round(p.price)
   if (!(price > 0)) return u.fail('请填写正确的价格')
-  const stock = Math.floor(p.stock)
-  if (!(stock >= 0)) return u.fail('请填写正确的库存')
+  const stock = Number(p.stock)
+  if (!Number.isInteger(stock) || stock < 0) return u.fail('请填写正确的库存')
   const images = (p.images || []).filter(x => typeof x === 'string' && x.startsWith('cloud://')).slice(0, 6)
   if (!images.length) return u.fail('请至少上传一张图片')
-  const data = { name, price, stock, images, desc: String(p.desc || '').slice(0, 2000), fixedDate: !!p.fixedDate, onShelf: !!p.onShelf, updatedAt: Date.now() }
+  const data = { name, price, images, desc: String(p.desc || '').slice(0, 2000), fixedDate: !!p.fixedDate, onShelf: !!p.onShelf, updatedAt: Date.now() }
   if (data.fixedDate) {
     const t = parseHm(p.activityStartTime)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(p.activityDate || '') || !t) return u.fail('固定日期活动需填写活动日期和开始时间')
@@ -311,11 +345,25 @@ async function productSave(user, p) {
     data.activityStartAt = 0
   }
   if (p._id) {
-    await db.collection('products').doc(p._id).update({ data })
-    await audit(user, 'product_update', { id: p._id, price })
+    // 庫存按「打開編輯頁時的庫存 → 保存時填的庫存」的增減量計算，編輯期間賣出的不會被加回來
+    const from = Number(p.stockFrom)
+    const delta = Number.isInteger(from) ? stock - from : 0
+    try {
+      await ord.tx(db, async t => {
+        const cur = await ord.tget(t, 'products', String(p._id))
+        if (!cur) return ord.rollbackWith(t, 'BAD', '商品不存在')
+        const next = (cur.stock || 0) + delta
+        if (next < 0) return ord.rollbackWith(t, 'BAD', `库存已被买走，当前仅剩 ${cur.stock}，请重新填写`)
+        await t.collection('products').doc(cur._id).update({ data: { ...data, stock: next } })
+      })
+    } catch (e) {
+      if (e.business) return u.fail(e.message)
+      throw e
+    }
+    await audit(user, 'product_update', { id: p._id, price, stockDelta: delta })
     return u.ok({ _id: p._id })
   }
-  const res = await db.collection('products').add({ data: { ...data, sort: 0, soldCount: 0, createdAt: Date.now() } })
+  const res = await db.collection('products').add({ data: { ...data, stock, sort: 0, soldCount: 0, createdAt: Date.now() } })
   await audit(user, 'product_create', { id: res._id })
   return u.ok({ _id: res._id })
 }
@@ -597,7 +645,7 @@ async function buildReport({ mode, from, to }) {
   }
   const payTimeOf = Object.fromEntries(orders.map(o => [o._id, o.payTime]))
   const refunds = (await cal.getAll(db.collection('refunds'), { status: 'success', at: _.gte(start).and(_.lt(end)) }))
-    .filter(r => r.by !== 'system' || r.reason !== '超时付款自动退款')
+    .filter(r => r.kind !== 'timeout' && (r.by !== 'system' || r.reason !== '超时付款自动退款'))
 
   const rows = {}
   const row = k => (rows[k] = rows[k] || { period: k, court: 0, product: 0, refund: 0 })

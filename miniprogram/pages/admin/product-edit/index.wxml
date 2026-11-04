@@ -17,6 +17,7 @@
     <input class="field" type="digit" value="{{price}}" data-field="price" bindinput="input" placeholder="例如：88.50" />
     <view class="label">库存</view>
     <input class="field" type="number" value="{{stock}}" data-field="stock" bindinput="input" placeholder="例如：20" />
+    <view wx:if="{{id}}" class="muted" style="font-size:24rpx;margin-top:8rpx">编辑期间如有人购买，保存时按你增减的数量计算，不会把已卖出的库存加回来</view>
   </view>
 
   <view class="card">

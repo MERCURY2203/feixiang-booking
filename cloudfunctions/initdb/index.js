@@ -6,7 +6,7 @@ const db = cloud.database()
 const COLLECTIONS = [
   'users', 'slot_locks', 'orders', 'order_items', 'products', 'prices',
   'business_hours', 'banners', 'refunds', 'audit_logs', 'invites', 'settings',
-  'verify_logs', 'notices'
+  'verify_logs', 'notices', 'user_pending', 'coupon_codes'
 ]
 
 exports.main = async () => {

@@ -99,7 +99,7 @@ Page({
           .call('admin', 'refund', { orderId: this.orderId, parts })
           .then(r => {
             wx.hideLoading()
-            wx.showToast({ title: `已退款 ${formatFen(r.amount)}`, icon: 'none' })
+            wx.showToast({ title: r.processing ? '退款处理中，稍后到账' : `已退款 ${formatFen(r.amount)}`, icon: 'none' })
             this.load()
           })
           .catch(err => {

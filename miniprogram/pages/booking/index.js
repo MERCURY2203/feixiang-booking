@@ -63,14 +63,20 @@ Page({
 
   load(first, date) {
     return api
-      .call('booking', 'schedule', { date: date || this.data.date, withBanners: first })
+      .call('booking', 'schedule', { date: date || this.data.date, withBanners: true })
       .then(res => {
         syncServerTime(res.serverNow)
         this.raw = res.cells
         const update = {}
         const sameHours = res.hours.length === this.data.hours.length && (!res.hours.length || res.hours[0].hour === this.data.hours[0].hour)
         const dateChanged = res.date !== this.data.date || !sameHours
-        if (first) update.banners = res.banners || []
+        // 橫幅每次輪詢都檢查：限時橫幅到點自動出現／消失，有變化才刷新，避免輪播跳動
+        const banners = res.banners || []
+        const bannersKey = JSON.stringify(banners)
+        if (bannersKey !== this.bannersKey) {
+          this.bannersKey = bannersKey
+          update.banners = banners
+        }
         if (first || dateChanged) {
           update.days = res.days
           update.date = res.date
@@ -90,7 +96,8 @@ Page({
             if (!old || old.cls !== c.cls || old.text !== c.text) diff[`cells[${r}][${ci}]`] = c
           })
         )
-        if (res.days.length !== this.data.days.length || res.days[0].date !== this.data.days[0].date) diff.days = res.days
+        if (res.days.length !== this.data.days.length || (res.days[0] && res.days[0].date !== this.data.days[0].date)) diff.days = res.days
+        if (update.banners) diff.banners = update.banners
         if (Object.keys(diff).length) this.setData(diff)
       })
       .catch(err => {

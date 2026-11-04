@@ -98,7 +98,7 @@ Page({
           .call('booking', 'refund', { orderId: this.orderId, itemId: it._id, qty })
           .then(r => {
             wx.hideLoading()
-            wx.showToast({ title: `已退款 ${formatFen(r.amount)}`, icon: 'none' })
+            wx.showToast({ title: r.processing ? '退款处理中，稍后到账' : `已退款 ${formatFen(r.amount)}`, icon: 'none' })
             this.refresh()
           })
           .catch(err => {

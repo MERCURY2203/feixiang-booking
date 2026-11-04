@@ -32,8 +32,11 @@ miniprogram/              小程序前端（WXML／WXSS／JS）
 cloudfunctions/           雲函數（user、staff、booking、admin、payNotify、timer、initdb）
   _shared/                公共代碼（不上傳），用 scripts/sync-shared.js 複製到各函數 lib/
 scripts/                  輔助腳本
+tests/                    自動回歸測試（node tests/run.js），用假的雲開發環境跑真實雲函數代碼
 ```
 
 ## 進度
 
 程式已按任務清單寫完 T1–T23，尚未在真機上測試。照《部署與測試》逐項測試，通過後在《05-任務清單》打勾。
+
+2026-11-04 已按 Codex 檢查報告修正付款、退款、核銷、下單的並發問題（R1–R12 等），並加入自動測試：修改雲函數後執行 `node scripts/sync-shared.js` 和 `node tests/run.js`，全部通過再上傳。
