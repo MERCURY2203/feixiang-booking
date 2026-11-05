@@ -96,6 +96,13 @@ exports.main = async event => {
         if (user.role !== 'customer') return fail('老板和员工请先由老板移除身份后再注销')
         await db.collection('orders').where({ userId: user._id }).update({ data: { phone: '', deletedUser: true } })
         await db.collection('verify_logs').where({ userId: user._id }).update({ data: { phone: '' } })
+        // 舊核銷記錄可能沒有 userId：按訂單號再清一次
+        for (let skip = 0; ; skip += 100) {
+          const os = await db.collection('orders').where({ userId: user._id }).skip(skip).limit(100).get()
+          if (!os.data.length) break
+          await db.collection('verify_logs').where({ orderId: _.in(os.data.map(o => o._id)) }).update({ data: { phone: '' } })
+          if (os.data.length < 100) break
+        }
         await users.doc(user._id).update({
           data: { openid: `deleted_${user._id}`, phone: '', nickname: '', avatar: '', deletedAt: now }
         })

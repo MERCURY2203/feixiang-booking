@@ -118,6 +118,7 @@ Page({
     const court = this.data.courts[c]
     const hour = this.data.hours[r].hour
     const added = cart.toggleCourt(this.data.date, court, hour)
+    if (added === null) return api.toast(cart.FULL_TIP)
     this.setData({
       [`cells[${r}][${c}].cls`]: added ? 'sel' : 'free',
       cartCount: cart.count()

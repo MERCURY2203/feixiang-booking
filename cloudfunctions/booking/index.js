@@ -211,9 +211,17 @@ async function checkout(user, rawItems) {
 
   // 事務：待支付名額 + 所有格子「申請車位牌」+ 扣庫存 + 券碼佔位，有一項不成立就整單不成立（技術方案「關鍵機制 1」）
   let lastErr = null
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     const products = itemDocs.filter(x => x.kind === 'product')
     const codes = newCodes(products.length)
+    // 兼容舊數據：舊券碼沒有登記在 coupon_codes，下單前再查一次卡片表，撞到就換號（數據遷移後不會再發生）
+    if (codes.length) {
+      const legacy = await db.collection('order_items').where({ code: _.in(codes) }).count()
+      if (legacy.total) {
+        lastErr = new Error('券码冲突')
+        continue
+      }
+    }
     products.forEach((it, n) => (it.code = codes[n]))
     try {
       await ord.tx(db, async t => {

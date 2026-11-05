@@ -10,6 +10,8 @@ Page({
   },
 
   onLoad(options) {
+    // 本次編輯的操作編號：重複提交同一表單時，庫存只調整一次
+    this.opId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     const p = beijingParts(now())
     this.setData({ today: `${p.year}-${pad(p.month)}-${pad(p.day)}` })
     if (!options.id) return
@@ -65,14 +67,16 @@ Page({
   },
 
   save() {
+    if (this.saving) return
     const d = this.data
     const price = yuanToFen(d.price)
     if (!price) return api.toast('请填写正确的价格（最多两位小数）')
     if (!/^\d+$/.test(d.stock)) return api.toast('请填写正确的库存')
+    this.saving = true
     api
       .call('admin', 'productSave', {
         product: {
-          _id: d.id || undefined, name: d.name, images: d.images, price, stock: Number(d.stock), stockFrom: d.id ? d.stockFrom : undefined, desc: d.desc,
+          _id: d.id || undefined, name: d.name, images: d.images, price, stock: Number(d.stock), stockFrom: d.id ? d.stockFrom : undefined, opId: this.opId, desc: d.desc,
           fixedDate: d.fixedDate, activityDate: d.activityDate, activityStartTime: d.activityStartTime, onShelf: d.onShelf
         }
       })
@@ -80,7 +84,10 @@ Page({
         wx.showToast({ title: '已保存', icon: 'none' })
         setTimeout(() => wx.navigateBack(), 600)
       })
-      .catch(err => api.toast(err.message))
+      .catch(err => {
+        this.saving = false
+        api.toast(err.message)
+      })
   },
 
   remove() {

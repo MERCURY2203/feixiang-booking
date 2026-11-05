@@ -86,4 +86,15 @@ async function refund(cloud, order, outRefundNo, refundFee) {
   throw err
 }
 
-module.exports = { MOCK, MCH_ID, assertConfigured, unifiedOrder, queryOrder, closeOrder, refund }
+// 退款查詢：返回 'SUCCESS'（已到帳）| 'PROCESSING' | 'REFUNDCLOSE' | 'CHANGE'（異常）| 'UNKNOWN'
+async function queryRefund(cloud, order, outRefundNo) {
+  assertConfigured()
+  if (MOCK) return 'SUCCESS'
+  const res = await cloud.cloudPay.queryRefund({ subMchId: MCH_ID, nonceStr: nonce(), outRefundNo })
+  if (res.returnCode !== 'SUCCESS' || res.resultCode !== 'SUCCESS') return 'UNKNOWN'
+  // 返回字段名形如 refundStatus_0／refund_status_0（單筆退款時只有第 0 筆）
+  const key = Object.keys(res).find(k => /^refund_?status_?0$/i.test(k))
+  return key ? String(res[key]).toUpperCase() : 'UNKNOWN'
+}
+
+module.exports = { MOCK, MCH_ID, assertConfigured, unifiedOrder, queryOrder, closeOrder, refund, queryRefund }

@@ -22,7 +22,7 @@ Page({
       api.toast(`库存仅剩 ${p.stock}`)
       return
     }
-    cart.addProduct(p._id, 1)
+    if (!cart.addProduct(p._id, 1)) return api.toast(cart.FULL_TIP)
     this.setData({ cartCount: cart.count() })
     wx.showToast({ title: '已加入购物车', icon: 'none', duration: 1000 })
   },

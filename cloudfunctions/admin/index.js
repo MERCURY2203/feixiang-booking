@@ -345,16 +345,23 @@ async function productSave(user, p) {
     data.activityStartAt = 0
   }
   if (p._id) {
-    // 庫存按「打開編輯頁時的庫存 → 保存時填的庫存」的增減量計算，編輯期間賣出的不會被加回來
+    // 庫存按「打開編輯頁時的庫存 → 保存時填的庫存」的增減量計算，編輯期間賣出的不會被加回來。
+    // 每次打開編輯頁帶一個操作編號 opId：同一個編號重送（連按、網絡重試）只調整一次庫存
     const from = Number(p.stockFrom)
     const delta = Number.isInteger(from) ? stock - from : 0
+    const opId = typeof p.opId === 'string' ? p.opId.slice(0, 40) : ''
+    if (delta !== 0 && !opId) return u.fail('请重新打开编辑页再保存')
     try {
       await ord.tx(db, async t => {
         const cur = await ord.tget(t, 'products', String(p._id))
         if (!cur) return ord.rollbackWith(t, 'BAD', '商品不存在')
-        const next = (cur.stock || 0) + delta
+        const ops = Array.isArray(cur.stockOps) ? cur.stockOps : []
+        const done = opId && ops.find(o => o.id === opId)
+        if (done && done.delta !== delta) return ord.rollbackWith(t, 'BAD', '库存已按上次保存调整过，请重新打开编辑页再修改')
+        const next = done ? cur.stock || 0 : (cur.stock || 0) + delta
         if (next < 0) return ord.rollbackWith(t, 'BAD', `库存已被买走，当前仅剩 ${cur.stock}，请重新填写`)
-        await t.collection('products').doc(cur._id).update({ data: { ...data, stock: next } })
+        const stockOps = done || !opId ? ops : ops.concat([{ id: opId, delta, at: Date.now() }]).slice(-20)
+        await t.collection('products').doc(cur._id).update({ data: { ...data, stock: next, stockOps } })
       })
     } catch (e) {
       if (e.business) return u.fail(e.message)

@@ -282,12 +282,14 @@ const db = makeDb(store)
 
 // ---------- 假微信支付 ----------
 const wechat = {
-  orders: {}, refunds: {}, refundCalls: [], loseNextRefundResponse: false,
+  orders: {}, refunds: {}, refundCalls: [], loseNextRefundResponse: false, refundHook: null, refundStatus: {},
   reset() {
     this.orders = {}
     this.refunds = {}
     this.refundCalls = []
     this.loseNextRefundResponse = false
+    this.refundHook = null // 退款受理後、回覆前調用，可用來模擬回覆延遲或丟失
+    this.refundStatus = {} // 退款單號 → 退款查詢返回的狀態（默認 SUCCESS）
   },
   // 客人在微信裡付款成功
   pay(orderId) {
@@ -347,11 +349,17 @@ const cloudPay = {
     } else if (wechat.refunds[outRefundNo].fee !== refundFee) {
       return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'INVALID_REQUEST' }
     }
+    if (wechat.refundHook) await wechat.refundHook(outRefundNo)
     if (wechat.loseNextRefundResponse) {
       wechat.loseNextRefundResponse = false
       throw new Error('socket hang up') // 微信已受理，但回覆在網絡上丟失
     }
     return { returnCode: 'SUCCESS', resultCode: 'SUCCESS' }
+  },
+  async queryRefund({ outRefundNo }) {
+    await tick()
+    if (!wechat.refunds[outRefundNo]) return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'REFUNDNOTEXIST' }
+    return { returnCode: 'SUCCESS', resultCode: 'SUCCESS', refundStatus_0: wechat.refundStatus[outRefundNo] || 'SUCCESS' }
   }
 }
 

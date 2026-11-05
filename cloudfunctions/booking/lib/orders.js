@@ -116,13 +116,23 @@ async function getItems(db, orderId) {
   return res.data
 }
 
-function itemIdsOf(order) {
-  return order.itemIds || []
+// 事務只能按 _id 讀取，所以訂單上要有完整的卡片編號清單 itemIds。
+// 缺少清單時直接報錯阻止轉換，絕不把「讀不到卡片」當成「沒有卡片」。
+// 舊結構兼容：訂單沒有 itemIds 時，先按 orderId 查出卡片補寫上去（事務外，可重複執行）
+async function ensureItemIds(db, orderId) {
+  const order = await dget(db, 'orders', orderId)
+  if (!order || (Array.isArray(order.itemIds) && order.itemIds.length)) return order
+  const items = await getItems(db, orderId)
+  if (!items.length) return order // 仍然沒有：交給 txItems 報錯
+  const itemIds = items.map(i => i._id).sort()
+  await db.collection('orders').doc(orderId).update({ data: { itemIds } })
+  return { ...order, itemIds }
 }
 
 async function txItems(t, order) {
+  if (!Array.isArray(order.itemIds) || !order.itemIds.length) throw new Error(`订单 ${order._id} 缺少卡片清单，请先执行数据迁移`)
   const items = []
-  for (const id of itemIdsOf(order)) {
+  for (const id of order.itemIds) {
     const it = await tget(t, 'order_items', id)
     if (it) items.push(it)
   }
@@ -150,6 +160,7 @@ function productExpired(item, now) {
 
 function computeStatus(order, items, now) {
   if (order.status === 'pending' || FINAL.includes(order.status)) return order.status
+  if (!items.length) return order.status // 讀不到卡片時不改狀態
   const allRefunded = items.every(i => (i.kind === 'court' ? courtFullyRefunded(i) : (i.refundedQty || 0) >= i.qty))
   if (allRefunded) return 'refunded'
   const done = items.every(i =>
@@ -160,6 +171,7 @@ function computeStatus(order, items, now) {
 
 // 重新計算訂單狀態（事務內讀取，避免覆蓋同時發生的退款結果）
 async function refreshStatus(db, orderId) {
+  await ensureItemIds(db, orderId)
   return tx(db, async t => {
     const order = await tget(t, 'orders', orderId)
     if (!order) return null
@@ -203,6 +215,7 @@ async function applyRelease(t, ops) {
 // ---------- 待支付 → 關閉／取消（事務，只有仍是待支付時才轉換） ----------
 
 async function closePending(db, orderId, status) {
+  await ensureItemIds(db, orderId)
   return tx(db, async t => {
     const order = await tget(t, 'orders', orderId)
     if (!order) return null
@@ -221,6 +234,7 @@ async function closePending(db, orderId, status) {
 // 返回最新訂單。付款在有效期內、且車位牌仍屬於本訂單 → 訂單成立；
 // 否則（逾期付款、訂單已關閉／取消、場地已轉給別人）→ 全額退款，絕不復活已關閉的訂單
 async function markPaid(cloud, db, orderId, payTime) {
+  await ensureItemIds(db, orderId)
   const r = await tx(db, async t => {
     const order = await tget(t, 'orders', orderId)
     if (!order) return { action: 'none', order: null }
@@ -332,6 +346,7 @@ async function cancelPending(cloud, db, order) {
 
 // 1. 預留（事務）：parts = [{ itemId, qty, amount }]；qty 為商品退的張數（場地填 1），amount 為退款金額（分）
 async function reserveRefund(db, { orderId, parts, operatorId, by, reason, asExpired }) {
+  await ensureItemIds(db, orderId)
   return tx(db, async t => {
     const order = await tget(t, 'orders', orderId)
     if (!order) return rollbackWith(t, 'NOT_FOUND', '订单不存在')
@@ -384,7 +399,7 @@ async function finalizeRefund(db, outRefundNo) {
     const now = Date.now()
 
     if (r.kind === 'timeout') {
-      await t.collection('refunds').doc(outRefundNo).update({ data: { status: 'success', doneAt: now } })
+      await t.collection('refunds').doc(outRefundNo).update({ data: { status: 'success', doneAt: now, settledAmount: r.amount, wxState: 'ACCEPTED' } })
       await t.collection('orders').doc(order._id).update({
         data: { refundState: 'success', refundedFee: order.totalFee, refundCount: (order.refundCount || 0) + 1 }
       })
@@ -395,9 +410,11 @@ async function finalizeRefund(db, outRefundNo) {
     const items = await txItems(t, order)
     const byId = Object.fromEntries(items.map(i => [i._id, i]))
     const plan = []
+    let settled = 0 // 本次真正結算的金額：只計仍標記為「本退款處理中」的卡片，避免重複記帳
     for (const p of r.parts) {
       const it = byId[p.itemId]
       if (!it || it.refunding !== outRefundNo) continue
+      settled += p.amount
       const data = { refunding: '', refundingQty: 0, refundingFee: 0, refundedFee: (it.refundedFee || 0) + p.amount }
       const extra = {}
       if (it.kind === 'court') {
@@ -428,10 +445,11 @@ async function finalizeRefund(db, outRefundNo) {
       if (x.extra.unlock) await t.collection('slot_locks').doc(x.extra.unlock).remove()
       if (x.extra.stock) await t.collection('products').doc(x.extra.stock.id).update({ data: { stock: x.extra.stock.stock } })
     }
-    const updatedOrder = { ...order, refundedFee: (order.refundedFee || 0) + r.amount }
+    const updatedOrder = { ...order, refundedFee: (order.refundedFee || 0) + settled }
     updatedOrder.status = computeStatus(updatedOrder, Object.values(byId), now)
     await t.collection('orders').doc(order._id).update({ data: { refundedFee: updatedOrder.refundedFee, status: updatedOrder.status } })
-    await t.collection('refunds').doc(outRefundNo).update({ data: { status: 'success', doneAt: now } })
+    await t.collection('refunds').doc(outRefundNo).update({ data: { status: 'success', doneAt: now, settledAmount: settled, wxState: 'ACCEPTED' } })
+    if (settled !== r.amount) console.error('finalizeRefund settled mismatch', outRefundNo, settled, r.amount)
     return { refund: r, order: updatedOrder, changed: true }
   })
 }
@@ -457,6 +475,37 @@ async function abortRefund(db, outRefundNo, error) {
   })
 }
 
+async function markUnknown(db, outRefundNo, e) {
+  return tx(db, async t => {
+    const cur = await tget(t, 'refunds', outRefundNo)
+    if (!cur || cur.status === 'success' || cur.status === 'failed') return cur
+    await t.collection('refunds').doc(outRefundNo).update({
+      data: { status: 'unknown', attempts: (cur.attempts || 0) + 1, lastError: String((e && e.message) || e).slice(0, 200), lastTryAt: Date.now() }
+    })
+    return { ...cur, status: 'unknown' }
+  })
+}
+
+// 微信「受理」退款不等於「已到帳」：定時任務用退款查詢確認最終結果，異常時通知管理端人工處理
+async function confirmRefund(cloud, db, outRefundNo) {
+  const r = await dget(db, 'refunds', outRefundNo)
+  if (!r || r.status !== 'success' || r.wxState === 'SUCCESS' || r.wxState === 'ABNORMAL') return r
+  const order = await dget(db, 'orders', r.orderId)
+  const state = await pay.queryRefund(cloud, order, outRefundNo)
+  if (state === 'PROCESSING' || state === 'UNKNOWN') {
+    await db.collection('refunds').doc(outRefundNo).update({ data: { wxCheckedAt: Date.now() } })
+    return r
+  }
+  if (state === 'SUCCESS') {
+    await db.collection('refunds').doc(outRefundNo).update({ data: { wxState: 'SUCCESS', wxCheckedAt: Date.now() } })
+    return r
+  }
+  // REFUNDCLOSE（退款關閉）／CHANGE（退款異常，例如客人銀行卡已註銷）
+  await db.collection('refunds').doc(outRefundNo).update({ data: { wxState: 'ABNORMAL', wxRawState: state, wxCheckedAt: Date.now() } })
+  await notify(db, 'refund', `【退款异常，请人工处理】${u.formatFen(r.amount)}\n微信状态：${state}\n退款单号：${outRefundNo}\n订单号：${r.orderId}`, r.orderId)
+  return r
+}
+
 // 向微信申請（或重試）一筆已預留的退款。返回 { status: 'success' | 'processing' | 'failed', refund, order }
 async function processRefund(cloud, db, outRefundNo) {
   const r = await dget(db, 'refunds', outRefundNo)
@@ -471,11 +520,11 @@ async function processRefund(cloud, db, outRefundNo) {
       await notify(db, 'refund', `【退款失败，请人工处理】${u.formatFen(r.amount)}\n原因：${e.message}\n订单号：${order._id}`, order._id)
       return { status: 'failed', refund: r, error: e.message }
     }
-    // 結果不明：保留預留，由定時任務用同一單號重試
-    await db.collection('refunds').doc(outRefundNo)
-      .update({ data: { status: 'unknown', attempts: (r.attempts || 0) + 1, lastError: String(e.message || e).slice(0, 200), lastTryAt: Date.now() } })
-      .catch(() => {})
+    // 結果不明：保留預留，由定時任務用同一單號重試。
+    // 在事務裡確認仍未結束才標記，晚到的錯誤不能把別人已完成的退款改回「不明」
+    const cur = await markUnknown(db, outRefundNo, e).catch(() => null)
     console.error('refund unknown', outRefundNo, e)
+    if (cur && (cur.status === 'success' || cur.status === 'failed')) return { status: cur.status, refund: cur }
     return { status: 'processing', refund: r }
   }
 
@@ -501,8 +550,8 @@ async function refundItems(cloud, db, { order, parts, operatorId, by, reason, as
 }
 
 module.exports = {
-  FINAL, MAX_REFUNDS, isNotFound, tget, dget, tx, rollbackWith, notify, getItems, txItems,
+  FINAL, MAX_REFUNDS, isNotFound, tget, dget, tx, rollbackWith, notify, getItems, txItems, ensureItemIds,
   itemRefundable, productAvailable, courtFullyRefunded, productExpired, computeStatus, refreshStatus,
   planRelease, applyRelease, closePending, markPaid, verifyPaid, confirmIfPaid, settle, cancelPending,
-  reserveRefund, finalizeRefund, abortRefund, processRefund, refundItems
+  reserveRefund, finalizeRefund, abortRefund, markUnknown, confirmRefund, processRefund, refundItems
 }

@@ -1,7 +1,7 @@
 // 定時任務（每分鐘由雲函數定時觸發器執行；控制台把本函數「超時時間」設為 60 秒）
 // 1. 到期的待支付訂單：查單 → 關單 → 放出場地
 // 2. 定時對帳：最近關閉／取消的訂單再向微信查一次，有收款就全額退款（三道防線第 3 道）
-// 3. 退款補做：結果不明的退款，用同一個退款單號向微信重試，直到有明確結果
+// 3. 退款補做：結果不明的退款，用同一個退款單號向微信重試，直到有明確結果；已受理的退款用退款查詢確認到帳，異常時通知管理端
 // 4. 打完的場地卡片標為「已使用」，更新訂單狀態
 // 5. 固定日期活動過期：未使用張數自動全額退款
 // 6. 每天凌晨 3 點：最後一次訂場超過 1 年的客人，自動刪除手機號、頭像、暱稱（訂單和核銷記錄裡的手機號一併刪除）
@@ -13,6 +13,7 @@ const _ = db.command
 const u = require('./lib/util')
 const pay = require('./lib/pay')
 const ord = require('./lib/orders')
+const cal = require('./lib/calendar')
 
 const BUDGET_MS = 50 * 1000
 let deadline = 0
@@ -57,6 +58,21 @@ async function retryRefunds(now) {
       await ord.processRefund(cloud, db, r._id)
     } catch (e) {
       console.error('retryRefund', r._id, e)
+    }
+  }
+}
+
+async function confirmRefunds(now) {
+  const res = await db.collection('refunds')
+    .where({ status: 'success', wxState: 'ACCEPTED', doneAt: _.lt(now - 2 * 60 * 1000).and(_.gt(now - 30 * u.DAY)) })
+    .orderBy('doneAt', 'asc').limit(20).get()
+  for (const r of res.data) {
+    if (!timeLeft()) break
+    if (r.wxCheckedAt && now - r.wxCheckedAt < 10 * 60 * 1000) continue // 處理中的每 10 分鐘查一次
+    try {
+      await ord.confirmRefund(cloud, db, r._id)
+    } catch (e) {
+      console.error('confirmRefund', r._id, e)
     }
   }
 }
@@ -123,6 +139,11 @@ async function purgePhones(now) {
     const ids = res.data.map(x => x._id)
     await db.collection('orders').where({ userId: _.in(ids) }).update({ data: { phone: '', phonePurged: true } })
     await db.collection('verify_logs').where({ userId: _.in(ids) }).update({ data: { phone: '' } })
+    // 舊核銷記錄可能沒有 userId：按這些客人的訂單號再清一次
+    const orderIds = (await cal.getAll(db.collection('orders'), { userId: _.in(ids) })).map(o => o._id)
+    for (let i = 0; i < orderIds.length; i += 100) {
+      await db.collection('verify_logs').where({ orderId: _.in(orderIds.slice(i, i + 100)) }).update({ data: { phone: '' } })
+    }
     await db.collection('users').where({ _id: _.in(ids) }).update({ data: { phone: '', nickname: '', avatar: '', phonePurgedAt: now } })
   }
 }
@@ -134,6 +155,7 @@ exports.main = async () => {
     ['settleExpired', () => settleExpired(now)],
     ['retryRefunds', () => retryRefunds(now)],
     ['reconcile', () => reconcile(now)],
+    ['confirmRefunds', () => confirmRefunds(now)],
     ['finishCourts', () => finishCourts(now)],
     ['expireProducts', () => expireProducts(now)]
   ]

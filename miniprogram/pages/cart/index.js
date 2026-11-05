@@ -66,6 +66,7 @@ Page({
     const it = this.data.products[index]
     const qty = it.qty + delta
     if (qty < 1) return
+    if (qty > 99) return api.toast('每种商品一次最多买 99 张')
     if (it.stock !== undefined && qty > it.stock) {
       api.toast(`库存仅剩 ${it.stock}`)
       return

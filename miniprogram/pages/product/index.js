@@ -28,6 +28,7 @@ Page({
     const p = this.data.p
     const qty = this.data.qty + +e.currentTarget.dataset.delta
     if (qty < 1) return
+    if (qty > 99) return api.toast('每种商品一次最多买 99 张')
     if (qty > p.stock) {
       api.toast(`库存仅剩 ${p.stock}`)
       return
@@ -43,7 +44,7 @@ Page({
       api.toast(`库存仅剩 ${p.stock}`)
       return
     }
-    cart.addProduct(p._id, this.data.qty)
+    if (!cart.addProduct(p._id, this.data.qty)) return api.toast(cart.FULL_TIP)
     wx.showToast({ title: '已加入购物车', icon: 'none' })
   },
 

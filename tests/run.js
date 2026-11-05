@@ -236,13 +236,13 @@ test('R10 同一客人同時結算兩次，只產生一張待支付訂單', asyn
 test('R11 編輯商品時不會把編輯期間賣出的庫存加回來', async () => {
   const form = must(await call(admin, 'oO', { action: 'productGet', id: 'p1' }))
   await buy('oB', [product('p1', 1)])
-  const base = { _id: 'p1', name: '畅打券（新）', images: form.images, price: form.price, desc: '', fixedDate: false, onShelf: true }
+  const base = { _id: 'p1', name: '畅打券（新）', images: form.images, price: form.price, desc: '', fixedDate: false, onShelf: true, opId: 'op1' }
   must(await call(admin, 'oO', { action: 'productSave', product: { ...base, stock: 10, stockFrom: form.stock } }))
   assert.strictEqual(doc('products', 'p1').stock, 9)
   assert.strictEqual(doc('products', 'p1').name, '畅打券（新）')
-  must(await call(admin, 'oO', { action: 'productSave', product: { ...base, stock: 15, stockFrom: 10 } }))
+  must(await call(admin, 'oO', { action: 'productSave', product: { ...base, opId: 'op2', stock: 15, stockFrom: 10 } }))
   assert.strictEqual(doc('products', 'p1').stock, 14)
-  mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...base, stock: 0, stockFrom: 20 } }), /库存/)
+  mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...base, opId: 'op3', stock: 0, stockFrom: 20 } }), /库存/)
 })
 
 test('R12 結算時老闆改價：訂單總額永遠等於卡片金額相加', async () => {
@@ -259,6 +259,149 @@ test('R12 結算時老闆改價：訂單總額永遠等於卡片金額相加', a
       assert([5000, price].includes(it.price))
     }
   }
+})
+
+// ---------------- 複查報告（2026-11-04-recheck）N1–N7 ----------------
+
+test('N1 同一筆退款兩個處理者交錯：晚到的網絡錯誤不會覆蓋成功狀態，也不會重複記帳', async () => {
+  const id = await buy('oA', [court(3, 14)])
+  const it = itemsOf(id)[0]
+  let release
+  const gate = new Promise(r => (release = r))
+  let first = true
+  wechat.refundHook = async () => {
+    if (!first) return
+    first = false
+    await gate // 第一個處理者：微信已受理，但回覆卡住
+    throw new Error('delayed network failure')
+  }
+  const a = call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id })
+  for (let i = 0; i < 50 && !wechat.refundCalls.length; i++) await F.tick()
+  clock.now += 2 * MIN
+  await runTimer() // 第二個處理者用同一單號重試並結算
+  assert.strictEqual(doc('refunds', `${id}R01`).status, 'success')
+  release()
+  await a
+  assert.strictEqual(doc('refunds', `${id}R01`).status, 'success', '晚到的錯誤把成功改回了不明')
+  clock.now += 2 * MIN
+  await runTimer()
+  assert.strictEqual(doc('orders', id).refundedFee, it.price)
+  assert.strictEqual(doc('order_items', it._id).refundedFee, it.price)
+  assert.strictEqual(wechat.refundedTotal(id), it.price)
+})
+
+test('N2（預期設計）協商部分退款：只退部分金額後該券結案，不能再退差額', async () => {
+  const id = await buy('oA', [product('p1', 1)])
+  const it = itemsOf(id)[0]
+  must(await call(admin, 'oO', { action: 'refund', orderId: id, parts: [{ itemId: it._id, qty: 1, amount: 1000 }] }))
+  assert.strictEqual(doc('orders', id).status, 'refunded')
+  mustFail(await call(admin, 'oO', { action: 'refund', orderId: id, parts: [{ itemId: it._id, qty: 0, amount: 4000 }] }))
+  assert.strictEqual(wechat.refundedTotal(id), 1000)
+})
+
+test('N3 同一個商品表單重複提交（連按或網絡重送），庫存只調整一次', async () => {
+  const p = { _id: 'p1', name: '畅打券', images: ['cloud://p1'], price: 5000, desc: '', fixedDate: false, onShelf: true, stock: 15, stockFrom: 10, opId: 'formA' }
+  const [r1, r2] = await Promise.all([
+    call(admin, 'oO', { action: 'productSave', product: p }),
+    call(admin, 'oO', { action: 'productSave', product: p })
+  ])
+  assert(r1.ok && r2.ok)
+  must(await call(admin, 'oO', { action: 'productSave', product: p }))
+  assert.strictEqual(doc('products', 'p1').stock, 15)
+  mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...p, stock: 18 } }), /重新打开/)
+  mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...p, stock: 18, opId: '' } }), /重新打开/)
+})
+
+const stripField = (coll, id, field) => {
+  const d = doc(coll, id)
+  delete d[field]
+  delete d._id
+  store.write(coll, id, d)
+}
+
+test('N4 舊結構待支付訂單（沒有 itemIds）取消時，照樣放出場地、退回庫存', async () => {
+  const o = must(await checkout('oA', [court(4, 14), product('p1', 1)]))
+  stripField('orders', o.orderId, 'itemIds')
+  must(await call(booking, 'oA', { action: 'cancel', orderId: o.orderId }))
+  assert.strictEqual(doc('orders', o.orderId).status, 'cancelled')
+  assert.strictEqual(doc('slot_locks', `${D}_4_14`), null)
+  assert.strictEqual(doc('products', 'p1').stock, 10)
+})
+
+test('N5 舊結構已付款訂單（沒有 itemIds）不會被誤判為已全額退款', async () => {
+  const id = await buy('oA', [court(5, 14)])
+  stripField('orders', id, 'itemIds')
+  must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  await runTimer()
+  assert.strictEqual(doc('orders', id).status, 'active')
+  // 卡片完全找不到時，阻止轉換而不是當成全退
+  const saved = itemsOf(id)[0]
+  store.write('order_items', saved._id, null)
+  stripField('orders', id, 'itemIds')
+  await call(booking, 'oA', { action: 'orderDetail', orderId: id })
+  assert.strictEqual(doc('orders', id).status, 'active')
+  const { _id, ...rest } = saved
+  store.write('order_items', _id, rest)
+})
+
+test('N6 舊核銷記錄（沒有 userId）：註銷和一年自動刪除都能刪掉手機號', async () => {
+  const idA = await buy('oA', [product('p1', 1)])
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: itemsOf(idA)[0]._id, qty: 1 }))
+  const idB = await buy('oB', [product('p1', 2)])
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: itemsOf(idB)[0]._id, qty: 1 }))
+  for (const l of all('verify_logs')) stripField('verify_logs', l._id, 'userId')
+  must(await call(user, 'oA', { action: 'deleteAccount' }))
+  assert(all('verify_logs').filter(l => l.orderId === idA).every(l => l.phone === ''))
+  assert(all('verify_logs').filter(l => l.orderId === idB).every(l => l.phone === '13800002222'))
+  clock.now = Date.UTC(2027, 10, 12, 19, 0, 0)
+  await runTimer()
+  assert(all('verify_logs').every(l => l.phone === ''))
+})
+
+test('N7 新券碼不會與未登記的舊有效券碼重複', async () => {
+  store.write('order_items', 'OLD_ITEM', { orderId: 'OLD', kind: 'product', code: '111111', codeActive: true, qty: 1, price: 100 })
+  const real = Math.random
+  let n = 0
+  Math.random = () => (n++ < 12 ? 0.15 : real())
+  try {
+    const id = await buy('oA', [product('p1', 1)])
+    assert.notStrictEqual(itemsOf(id)[0].code, '111111')
+  } finally {
+    Math.random = real
+  }
+})
+
+test('數據遷移 initdb：補 itemIds、補 userId、登記舊券碼並處理重碼；重複執行不再改動', async () => {
+  const initdb = F.loadFn('initdb')
+  const idA = await buy('oA', [product('p1', 1), court(6, 14)])
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: itemsOf(idA).find(i => i.kind === 'product')._id, qty: 1 }))
+  stripField('orders', idA, 'itemIds')
+  for (const l of all('verify_logs')) stripField('verify_logs', l._id, 'userId')
+  store.write('order_items', 'OLD1', { orderId: 'OLDO', kind: 'product', code: '222222', codeActive: true, qty: 1, price: 100 })
+  store.write('order_items', 'OLD2', { orderId: 'OLDO', kind: 'product', code: '222222', codeActive: true, qty: 1, price: 100 })
+  const r1 = await call(initdb, '', {})
+  assert(r1.ok && r1.migration.done)
+  assert.deepStrictEqual(doc('orders', idA).itemIds, itemsOf(idA).map(i => i._id).sort())
+  assert(all('verify_logs').every(l => l.userId === 'uA'))
+  assert.strictEqual(r1.migration.codesChanged.length, 1)
+  assert.notStrictEqual(doc('order_items', 'OLD1').code, doc('order_items', 'OLD2').code)
+  for (const it of all('order_items').filter(i => i.kind === 'product')) assert.strictEqual(doc('coupon_codes', it.code).itemId, it._id)
+  const r2 = await call(initdb, '', {})
+  assert.strictEqual(r2.migration.ordersFixed + r2.migration.logsFixed + r2.migration.codesRegistered + r2.migration.codesChanged.length, 0)
+})
+
+test('退款受理後用退款查詢確認到帳；異常時通知管理端', async () => {
+  const id = await buy('oA', [court(7, 14), court(7, 15)])
+  const [c1, c2] = itemsOf(id)
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: c1._id }))
+  wechat.refundStatus[`${id}R02`] = 'CHANGE'
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: c2._id }))
+  assert.strictEqual(doc('refunds', `${id}R01`).wxState, 'ACCEPTED')
+  clock.now += 3 * MIN
+  await runTimer()
+  assert.strictEqual(doc('refunds', `${id}R01`).wxState, 'SUCCESS')
+  assert.strictEqual(doc('refunds', `${id}R02`).wxState, 'ABNORMAL')
+  assert(all('notices').some(n => /退款异常/.test(n.text)))
 })
 
 // ---------------- 其他關鍵流程 ----------------
