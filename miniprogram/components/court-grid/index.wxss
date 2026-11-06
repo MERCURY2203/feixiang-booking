@@ -19,4 +19,7 @@
 .cell.locked { background: #F2F2F2; border-color: #F2F2F2; color: #8C8C8C; font-weight: 400; }
 .cell.booked { background: #E8EFFA; border-color: #E8EFFA; color: #2B5AAE; font-weight: 400; }
 .cell.special { background: #E8EFFA; border-color: #2B5AAE; color: #2B5AAE; font-weight: 600; }
+/* 我訂的場地：淺藍底＋藍框＋「我的」；我的待支付：同樣的藍框虛線＋中間一個沙漏，避免誤以為被別人搶先訂了 */
+.cell.mine { background: #D9E6FB; border: 2rpx solid #2B5AAE; color: #2B5AAE; font-weight: 600; }
+.cell.mypending { background: #EEF3FC; border: 2rpx dashed #2B5AAE; color: #2B5AAE; font-size: 40rpx; }
 .tail { height: 40rpx; }

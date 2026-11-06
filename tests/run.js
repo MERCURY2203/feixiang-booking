@@ -508,6 +508,23 @@ test('支付未配置時不會悄悄進入模擬支付', async () => {
   }
 })
 
+test('訂場表格：自己訂的格子標為 mine，自己待支付的標為 mypending，別人看到的是 taken', async () => {
+  const paid = await buy('oA', [court(1, 10)])
+  const pend = must(await checkout('oB', [court(2, 11)]))
+  const cell = (data, c, h) => data.cells[h - data.hours[0].hour][c - 1].s
+  const forA = must(await call(booking, 'oA', { action: 'schedule', date: D }))
+  const forB = must(await call(booking, 'oB', { action: 'schedule', date: D }))
+  assert.strictEqual(cell(forA, 1, 10), 'mine')
+  assert.strictEqual(cell(forA, 2, 11), 'taken')
+  assert.strictEqual(cell(forB, 1, 10), 'taken')
+  assert.strictEqual(cell(forB, 2, 11), 'mypending')
+  assert(paid && pend)
+  // 5 分鐘沒付款後，待支付的格子不再算「我的」
+  clock.now += 6 * MIN
+  const later = must(await call(booking, 'oB', { action: 'schedule', date: D }))
+  assert.strictEqual(cell(later, 2, 11), 'free')
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

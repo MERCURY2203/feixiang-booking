@@ -24,7 +24,7 @@ async function activeBanners(now) {
 
 // ---------- 訂場表格 ----------
 
-async function schedule(date) {
+async function schedule(date, openid) {
   const now = Date.now()
   const cfg = await cal.loadConfig(db)
   const days = cal.bookableDays(cfg, now)
@@ -41,6 +41,13 @@ async function schedule(date) {
   const h = cal.hoursFor(cfg, date)
   const locks = await db.collection('slot_locks').where({ date }).limit(1000).get()
   const lockMap = Object.fromEntries(locks.data.map(l => [l._id, l]))
+  // 這位客人自己訂的（含待支付）：用佔用記錄的訂單號對上「我的」卡片，不洩露別人的任何資料
+  const mine = {}
+  const me = openid ? await getCaller(db, openid) : null
+  if (me) {
+    const mineItems = await db.collection('order_items').where({ userId: me._id, kind: 'court', date }).limit(200).get()
+    for (const i of mineItems.data) mine[u.slotId(i.date, i.court, i.hour)] = i.orderId
+  }
   for (let hour = h.open; hour < h.close; hour++) {
     result.hours.push({ hour, label: `${u.pad(hour)}:00` })
     const row = []
@@ -49,7 +56,10 @@ async function schedule(date) {
       const lock = lockMap[u.slotId(date, court, hour)]
       const busy = lock && !(lock.status === 'pending' && lock.expiresAt < now)
       const { price } = cal.priceFor(cfg, date, court, hour)
-      row.push({ s: past ? 'past' : busy ? 'taken' : 'free', p: price })
+      const isMine = busy && mine[u.slotId(date, court, hour)] === lock.orderId
+      // mine＝我已付款訂到的；mypending＝我的待支付訂單佔著（顯示沙漏，免得誤以為被別人搶先）
+      const s = isMine ? (lock.status === 'pending' ? 'mypending' : 'mine') : past ? 'past' : busy ? 'taken' : 'free'
+      row.push({ s, p: price })
     }
     result.cells.push(row)
   }
@@ -398,7 +408,7 @@ exports.main = async event => {
     // 不需登入的瀏覽
     switch (event.action) {
       case 'schedule':
-        return u.ok({ ...(await schedule(event.date)), banners: event.withBanners ? await activeBanners(Date.now()) : undefined })
+        return u.ok({ ...(await schedule(event.date, OPENID)), banners: event.withBanners ? await activeBanners(Date.now()) : undefined })
       case 'banners':
         return u.ok(await activeBanners(Date.now()))
       case 'quote':

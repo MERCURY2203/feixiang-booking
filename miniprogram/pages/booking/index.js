@@ -56,6 +56,8 @@ Page({
   view(raw, date) {
     return raw.map((row, r) =>
       row.map((c, ci) => {
+        if (c.s === 'mine') return { cls: 'mine', text: '我的' }
+        if (c.s === 'mypending') return { cls: 'mypending', text: '⏳' }
         if (c.s === 'past') return { cls: 'past', text: '' }
         if (c.s === 'taken') return { cls: 'taken', text: '' }
         const sel = cart.hasCourt(date, this.data.courts[ci] || ci + 1, this.data.hours[r] ? this.data.hours[r].hour : 0)
@@ -118,7 +120,8 @@ Page({
   onCellTap(e) {
     const { r, c } = e.detail
     const cell = this.data.cells[r][c]
-    if (cell.cls === 'past' || cell.cls === 'taken') return
+    if (cell.cls === 'mypending') return api.toast('这格是你的待支付订单，请尽快支付')
+    if (cell.cls === 'past' || cell.cls === 'taken' || cell.cls === 'mine') return
     const court = this.data.courts[c]
     const hour = this.data.hours[r].hour
     const added = cart.toggleCourt(this.data.date, court, hour)
