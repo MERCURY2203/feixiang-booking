@@ -1,5 +1,5 @@
-.banner { height: 300rpx; }
-.banner-img { width: 100%; height: 300rpx; }
+.banner { height: 422rpx; }
+.banner-img { width: 100%; height: 422rpx; }
 .dates { white-space: nowrap; background: #FFFFFF; border-bottom: 1rpx solid var(--border); padding: 16rpx 0 16rpx 24rpx; }
 .date { display: inline-block; padding: 14rpx 24rpx; margin-right: 16rpx; border-radius: 12rpx; border: 1rpx solid var(--border); font-size: 28rpx; }
 .date.on { background: var(--primary); border-color: var(--primary); color: #FFFFFF; font-weight: 600; }

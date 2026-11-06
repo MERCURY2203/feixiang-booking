@@ -1,5 +1,6 @@
 // 新增／編輯商品：名稱、圖片（最多 6 張）、價格、庫存、說明、類型（固定日期／長期）、上下架
 const api = require('../../../utils/api')
+const { pickImages } = require('../../../utils/image')
 const { yuanToFen } = require('../../../utils/money')
 const { now, beijingParts, pad } = require('../../../utils/time')
 
@@ -42,21 +43,18 @@ Page({
   addImage() {
     const left = 6 - this.data.images.length
     if (left <= 0) return
-    wx.chooseMedia({
-      count: left,
-      mediaType: ['image'],
-      sizeType: ['compressed'],
-      success: res => {
-        wx.showLoading({ title: '上传中', mask: true })
-        Promise.all(
-          res.tempFiles.map(f =>
-            wx.cloud.uploadFile({ cloudPath: `products/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`, filePath: f.tempFilePath }).then(r => r.fileID)
-          )
+    // 每張圖選好後依序進入裁剪畫面，手動調整 4:3 的範圍（商品詳情頁大圖就是 4:3）
+    pickImages({ count: left, scale: '4:3' }).then(paths => {
+      if (!paths.length) return
+      wx.showLoading({ title: '上传中', mask: true })
+      return Promise.all(
+        paths.map(p =>
+          wx.cloud.uploadFile({ cloudPath: `products/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`, filePath: p }).then(r => r.fileID)
         )
-          .then(ids => this.setData({ images: this.data.images.concat(ids) }))
-          .catch(() => api.toast('上传失败，请重试'))
-          .finally(() => wx.hideLoading())
-      }
+      )
+        .then(ids => this.setData({ images: this.data.images.concat(ids) }))
+        .catch(() => api.toast('上传失败，请重试'))
+        .finally(() => wx.hideLoading())
     })
   },
 

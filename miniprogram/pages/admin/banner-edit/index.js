@@ -1,5 +1,6 @@
 // 新增／編輯橫幅：圖片、跳轉目標（從清單點選）、顯示方式（長期／限時）
 const api = require('../../../utils/api')
+const { pickImages } = require('../../../utils/image')
 
 const TARGETS = [
   { type: 'none', name: '不跳转' },
@@ -27,19 +28,16 @@ Page({
     })
   },
 
+  // 選圖後進入裁剪畫面，手動調整 16:9 的範圍（首頁橫幅就是 16:9）
   chooseImage() {
-    wx.chooseMedia({
-      count: 1,
-      mediaType: ['image'],
-      sizeType: ['compressed'],
-      success: res => {
-        wx.showLoading({ title: '上传中', mask: true })
-        wx.cloud
-          .uploadFile({ cloudPath: `banners/${Date.now()}.jpg`, filePath: res.tempFiles[0].tempFilePath })
-          .then(r => this.setData({ 'b.image': r.fileID }))
-          .catch(() => api.toast('上传失败，请重试'))
-          .finally(() => wx.hideLoading())
-      }
+    pickImages({ count: 1, scale: '16:9' }).then(paths => {
+      if (!paths.length) return
+      wx.showLoading({ title: '上传中', mask: true })
+      return wx.cloud
+        .uploadFile({ cloudPath: `banners/${Date.now()}.jpg`, filePath: paths[0] })
+        .then(r => this.setData({ 'b.image': r.fileID }))
+        .catch(() => api.toast('上传失败，请重试'))
+        .finally(() => wx.hideLoading())
     })
   },
 

@@ -50,7 +50,11 @@ Page({
   },
 
   onPhone(e) {
-    if (!e.detail.code) return
+    if (!e.detail.code) {
+      const msg = e.detail.errMsg || ''
+      if (msg && !/deny|cancel/i.test(msg)) api.toast(`授权失败：${msg}`)
+      return
+    }
     api
       .call('user', 'bindPhone', { code: e.detail.code })
       .then(user => {

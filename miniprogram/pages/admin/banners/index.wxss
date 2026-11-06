@@ -1,5 +1,5 @@
 .tip { margin-bottom: 20rpx; }
-.img { width: 100%; height: 260rpx; border-radius: 12rpx; background: var(--past); }
+.img { width: 100%; height: 388rpx; border-radius: 12rpx; background: var(--past); }
 .meta { margin-top: 16rpx; align-items: flex-start; }
 .state { font-weight: 600; color: var(--text-2); }
 .state.on { color: var(--primary); }
