@@ -93,16 +93,15 @@ function newId(prefix) {
   return `${prefix}${stamp}${randomDigits(6)}`
 }
 
-// 訂單卡片用的明細：只合併同類項。場地按「日期＋場地號」合併（不論時段連不連續，每個時段單獨一行），
-// 商品按商品合併；n＝乘幾（場地＝小時數，商品＝件數）
+// 訂單卡片用的明細：場地按日期分組，每個時段一行「時段 … 場號」（依時間、場號排序）；
+// 同一種商品合併成一組，n＝件數（顯示在右上角圓圈）
 function orderLines(items) {
-  const courts = new Map()
+  const days = new Map()
   const products = new Map()
   for (const i of items) {
     if (i.type === 'court') {
-      const k = `${i.date}|${i.court}`
-      if (!courts.has(k)) courts.set(k, { date: i.date, court: i.court, hours: [] })
-      courts.get(k).hours.push(i.hour)
+      if (!days.has(i.date)) days.set(i.date, [])
+      days.get(i.date).push(i)
     } else {
       const k = i.productId || i.label
       if (!products.has(k)) products.set(k, { title: i.label, n: 0 })
@@ -110,10 +109,9 @@ function orderLines(items) {
     }
   }
   const lines = []
-  const cs = [...courts.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.court - b.court))
-  for (const c of cs) {
-    c.hours.sort((a, b) => a - b)
-    lines.push({ kind: 'court', title: `${c.court}号场`, date: cnDate(c.date), times: c.hours.map(hourRange), n: c.hours.length })
+  for (const date of [...days.keys()].sort()) {
+    const rows = days.get(date).sort((x, y) => x.hour - y.hour || x.court - y.court)
+    lines.push({ kind: 'court', date: cnDate(date), rows: rows.map(r => ({ time: hourRange(r.hour), court: `${r.court}号场` })) })
   }
   for (const p of products.values()) lines.push({ kind: 'product', title: p.title, n: p.n })
   return lines

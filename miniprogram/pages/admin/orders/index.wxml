@@ -21,11 +21,15 @@
       <text class="status">{{item.statusText}}</text>
     </view>
     <view class="ol-lines">
-      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line">
-        <view class="ol-title">{{ln.title}}</view>
-        <view wx:if="{{ln.date}}" class="ol-sub">{{ln.date}}</view>
-        <view wx:for="{{ln.times}}" wx:for-item="tm" wx:key="*this" class="ol-sub">{{tm}}</view>
-        <view wx:if="{{ln.n}}" class="ol-n">×{{ln.n}}</view>
+      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}}">
+        <block wx:if="{{ln.kind === 'court'}}">
+          <view class="ol-date">{{ln.date}}</view>
+          <view wx:for="{{ln.rows}}" wx:for-item="r" wx:for-index="ri" wx:key="ri" class="ol-row"><text>{{r.time}}</text><text class="ol-court">{{r.court}}</text></view>
+        </block>
+        <block wx:else>
+          <view class="ol-title">{{ln.title}}</view>
+          <view wx:if="{{ln.n}}" class="ol-n">×{{ln.n}}</view>
+        </block>
       </view>
     </view>
     <view class="row"><text class="muted">{{item._id}}</text><text class="amount">{{item.totalText}}</text></view>

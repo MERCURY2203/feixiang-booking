@@ -525,15 +525,17 @@ test('訂場表格：自己訂的格子標為 mine，自己待支付的標為 my
   assert.strictEqual(cell(later, 2, 11), 'free')
 })
 
-test('訂單明細：同日同場地的時段合併（不論連不連續），商品合併，每行帶乘幾', async () => {
-  const o = must(await checkout('oA', [court(1, 18), court(1, 20), court(2, 18), product('p1', 3)]))
+test('訂單明細：場地按日期分組、每個時段一行（時段＋場號），商品合併帶件數', async () => {
+  const o = must(await checkout('oA', [court(2, 18), court(1, 20), court(1, 18), product('p1', 3)]))
   const lines = doc('orders', o.orderId).lines
-  assert.strictEqual(lines.length, 3)
-  assert.deepStrictEqual(lines[0], { kind: 'court', title: '1号场', date: '11月11日', times: ['18:00–19:00', '20:00–21:00'], n: 2 })
-  assert.strictEqual(lines[1].n, 1)
-  assert.deepStrictEqual(lines[2], { kind: 'product', title: '畅打券', n: 3 })
+  assert.strictEqual(lines.length, 2)
+  assert.deepStrictEqual(lines[0], {
+    kind: 'court', date: '11月11日',
+    rows: [{ time: '18:00–19:00', court: '1号场' }, { time: '18:00–19:00', court: '2号场' }, { time: '20:00–21:00', court: '1号场' }]
+  })
+  assert.deepStrictEqual(lines[1], { kind: 'product', title: '畅打券', n: 3 })
   const list = must(await call(booking, 'oA', { action: 'myOrders', tab: 'all', skip: 0 }))
-  assert.strictEqual(list.list[0].lines.length, 3)
+  assert.strictEqual(list.list[0].lines.length, 2)
   // 舊訂單沒有明細：拆摘要，不報錯
   const legacy = { ...doc('orders', o.orderId), summary: 'A；B' }
   delete legacy.lines
