@@ -6,11 +6,11 @@
 .corner { position: sticky; left: 0; z-index: 4; width: 120rpx; height: 72rpx; background: #FFFFFF; color: #666666; border-bottom: 1rpx solid #E6E6E6; }
 .hcell { width: 150rpx; height: 72rpx; background: #FFFFFF; color: #1A1A1A; font-weight: 600; border-bottom: 1rpx solid #E6E6E6; }
 .tcell { position: sticky; left: 0; z-index: 2; width: 120rpx; height: 92rpx; background: #FFFFFF; color: #666666; border-right: 1rpx solid #E6E6E6; }
-.cell { width: 142rpx; height: 80rpx; margin: 6rpx 4rpx; border-radius: 12rpx; border: 1rpx solid #D9D9D9; background: #FFFFFF; color: #1A1A1A; font-weight: 600; }
+.cell { width: 142rpx; height: 80rpx; margin: 6rpx 4rpx; border-radius: 12rpx; border: 1rpx solid #D9D9D9; background: #FFFFFF; color: #A6A6A6; font-weight: 400; }
 .cell.sel { background: #2B5AAE; border-color: #2B5AAE; color: #FFFFFF; }
 .cell.taken { background: #D9D9D9; border-color: #D9D9D9; color: #8C8C8C; font-weight: 400; }
 .cell.past { background: #F2F2F2; border-color: #F2F2F2; color: transparent; }
 .cell.locked { background: #D9D9D9; border-color: #D9D9D9; color: #666666; font-weight: 400; }
 .cell.booked { background: #E8EFFA; border-color: #E8EFFA; color: #2B5AAE; font-weight: 400; }
-.cell.special { background: #E8EFFA; border-color: #2B5AAE; color: #2B5AAE; }
+.cell.special { background: #E8EFFA; border-color: #2B5AAE; color: #2B5AAE; font-weight: 600; }
 .tail { height: 200rpx; }
