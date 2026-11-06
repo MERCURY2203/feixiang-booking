@@ -1,6 +1,7 @@
 // 我的訂單：按狀態分頁（澄清 A1，任務 T11）；待支付卡片直接顯示倒計時和兩個按鈕
 const api = require('../../../utils/api')
 const { formatFen } = require('../../../utils/money')
+const { split } = require('../../../utils/cards')
 const { now, syncServerTime, formatBeijing } = require('../../../utils/time')
 
 const linesOf = o => o.lines || String(o.summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 }))
@@ -52,7 +53,7 @@ Page({
         syncServerTime(res.serverNow)
         const rows = res.list.map(o => ({
           ...o,
-          lines: linesOf(o),
+          cards: split(o, linesOf(o)),
           totalText: formatFen(o.totalFee),
           created: formatBeijing(o.createdAt),
           left: ''

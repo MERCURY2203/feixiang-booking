@@ -104,16 +104,17 @@ function orderLines(items) {
       days.get(i.date).push(i)
     } else {
       const k = i.productId || i.label
-      if (!products.has(k)) products.set(k, { title: i.label, n: 0 })
+      if (!products.has(k)) products.set(k, { title: i.label, n: 0, fee: 0 })
       products.get(k).n += i.qty
+      products.get(k).fee += (i.price || 0) * i.qty
     }
   }
   const lines = []
   for (const date of [...days.keys()].sort()) {
     const rows = days.get(date).sort((x, y) => x.hour - y.hour || x.court - y.court)
-    lines.push({ kind: 'court', date: cnDate(date), rows: rows.map(r => ({ time: hourRange(r.hour), court: `${r.court}号场` })) })
+    lines.push({ kind: 'court', date: cnDate(date), fee: rows.reduce((t, r) => t + (r.price || 0), 0), rows: rows.map(r => ({ time: hourRange(r.hour), court: `${r.court}号场` })) })
   }
-  for (const p of products.values()) lines.push({ kind: 'product', title: p.title, n: p.n })
+  for (const p of products.values()) lines.push({ kind: 'product', title: p.title, n: p.n, fee: p.fee })
   return lines
 }
 

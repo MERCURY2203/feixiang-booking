@@ -15,13 +15,14 @@
   </view>
 
   <view wx:if="{{loaded && !list.length}}" class="placeholder">没有找到订单</view>
-  <view wx:for="{{list}}" wx:key="_id" class="card" data-index="{{index}}" bindtap="open">
+  <block wx:for="{{list}}" wx:for-item="o" wx:for-index="index" wx:key="_id">
+  <view wx:for="{{o.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="key" class="card" data-index="{{index}}" bindtap="open">
     <view class="row">
-      <text class="muted">{{item.created}} · {{item.phone}}</text>
-      <text class="status">{{item.statusText}}</text>
+      <text class="muted">{{o.created}} · {{o.phone}}</text>
+      <text class="status">{{o.statusText}}</text>
     </view>
     <view class="ol-lines">
-      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}} {{ln.kind === 'court' || ln.kind === 'courtRow' ? '' : 'prod'}}">
+      <view wx:for="{{cd.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}}">
         <view wx:if="{{ln.kind === 'courtRow'}}" class="ol-row"><text>{{ln.date}} {{ln.time}}</text><text class="ol-court">{{ln.court}}</text></view>
         <block wx:else>
           <view class="ol-title">{{ln.title}}</view>
@@ -29,6 +30,7 @@
         </block>
       </view>
     </view>
-    <view class="row"><text class="muted">{{item._id}}</text><text class="amount">{{item.totalText}}</text></view>
+    <view class="row"><text class="muted">{{o._id}}</text><text class="amount">{{cd.totalText}}</text></view>
   </view>
+  </block>
 </view>

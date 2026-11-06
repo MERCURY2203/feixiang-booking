@@ -529,6 +529,10 @@ test('訂單明細：場地按日期分組、每個時段一行（時段＋場�
   const o = must(await checkout('oA', [court(2, 18), court(1, 20), court(1, 18), product('p1', 3)]))
   const lines = doc('orders', o.orderId).lines
   assert.strictEqual(lines.length, 2)
+  const o2 = doc('orders', o.orderId)
+  assert.strictEqual(lines[0].fee + lines[1].fee, o2.totalFee) // 各項金額加起來等於訂單總額（前端拆卡片用）
+  delete lines[0].fee
+  delete lines[1].fee
   assert.deepStrictEqual(lines[0], {
     kind: 'court', date: '11月11日',
     rows: [{ time: '18:00–19:00', court: '1号场' }, { time: '18:00–19:00', court: '2号场' }, { time: '20:00–21:00', court: '1号场' }]
