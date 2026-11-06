@@ -10,7 +10,14 @@
       <text class="muted">{{item.created}}</text>
       <text class="status {{item.status}}">{{item.statusText}}</text>
     </view>
-    <view class="summary">{{item.summary}}</view>
+    <view class="ol-lines">
+      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line">
+        <view class="ol-title">{{ln.title}}</view>
+        <view wx:if="{{ln.date}}" class="ol-sub">{{ln.date}}</view>
+        <view wx:for="{{ln.times}}" wx:for-item="tm" wx:key="*this" class="ol-sub">{{tm}}</view>
+        <view wx:if="{{ln.n}}" class="ol-n">×{{ln.n}}</view>
+      </view>
+    </view>
     <view class="row">
       <text wx:if="{{item.status === 'pending'}}" class="left">剩余 {{item.left}}</text>
       <text wx:else></text>

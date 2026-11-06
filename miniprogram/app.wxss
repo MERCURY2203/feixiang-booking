@@ -53,3 +53,10 @@ page {
 
 .row { display: flex; align-items: center; justify-content: space-between; }
 .placeholder { text-align: center; color: var(--text-2); padding: 120rpx 0; }
+
+/* 訂單卡片明細：同類項合併，每條信息單獨一行，右上角圓圈寫乘幾 */
+.ol-line { position: relative; padding: 16rpx 96rpx 16rpx 0; border-bottom: 1rpx solid var(--border); }
+.ol-line:last-child { border-bottom: none; }
+.ol-title { font-size: 30rpx; font-weight: 600; }
+.ol-sub { font-size: 28rpx; color: var(--text-2); margin-top: 6rpx; }
+.ol-n { position: absolute; top: 14rpx; right: 0; min-width: 64rpx; height: 64rpx; padding: 0 8rpx; box-sizing: border-box; border: 3rpx solid var(--primary); border-radius: 50%; color: var(--primary); font-size: 28rpx; font-weight: 600; display: flex; align-items: center; justify-content: center; }

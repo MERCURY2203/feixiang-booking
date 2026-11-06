@@ -153,7 +153,7 @@ async function adminOrders({ keyword, date, tab, skip }) {
   const res = await db.collection('orders').where(where).orderBy('createdAt', 'desc').skip(skip || 0).limit(20).get()
   return u.ok({
     list: res.data.map(o => ({
-      _id: o._id, created: `${u.dateStr(o.createdAt).slice(5)} ${hm(o.createdAt)}`, summary: o.summary,
+      _id: o._id, created: `${u.dateStr(o.createdAt).slice(5)} ${hm(o.createdAt)}`, summary: o.summary, lines: o.lines || u.legacyLines(o.summary),
       totalFee: o.totalFee, statusText: statusText(o), phone: o.deletedUser || o.phonePurged ? '已注销用户' : u.maskPhone(o.phone)
     })),
     more: res.data.length === 20

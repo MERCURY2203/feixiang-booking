@@ -197,6 +197,7 @@ async function checkout(user, rawItems) {
     refundedFee: 0,
     refundCount: 0,
     itemIds: [],
+    lines: u.orderLines(q),
     summary: q.map(i => (i.type === 'court' ? `${u.cnDate(i.date)} ${u.hourRange(i.hour)} ${i.court}号场` : `${i.label} ×${i.qty}`)).join('；')
   }
   // 卡片價格取自同一次報價；訂單總額 = 卡片金額相加，保證兩者永遠一致
@@ -357,7 +358,7 @@ function orderView(order) {
   return {
     _id: order._id, status: order.status, statusText: statusText(order), totalFee: order.totalFee,
     refundedFee: order.refundedFee || 0, createdAt: order.createdAt, expiresAt: order.expiresAt,
-    summary: order.summary, confirming: !!order.confirming
+    summary: order.summary, lines: order.lines || u.legacyLines(order.summary), confirming: !!order.confirming
   }
 }
 

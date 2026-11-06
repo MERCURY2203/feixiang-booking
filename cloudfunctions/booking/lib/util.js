@@ -93,8 +93,39 @@ function newId(prefix) {
   return `${prefix}${stamp}${randomDigits(6)}`
 }
 
+// 訂單卡片用的明細：只合併同類項。場地按「日期＋場地號」合併（不論時段連不連續，每個時段單獨一行），
+// 商品按商品合併；n＝乘幾（場地＝小時數，商品＝件數）
+function orderLines(items) {
+  const courts = new Map()
+  const products = new Map()
+  for (const i of items) {
+    if (i.type === 'court') {
+      const k = `${i.date}|${i.court}`
+      if (!courts.has(k)) courts.set(k, { date: i.date, court: i.court, hours: [] })
+      courts.get(k).hours.push(i.hour)
+    } else {
+      const k = i.productId || i.label
+      if (!products.has(k)) products.set(k, { title: i.label, n: 0 })
+      products.get(k).n += i.qty
+    }
+  }
+  const lines = []
+  const cs = [...courts.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.court - b.court))
+  for (const c of cs) {
+    c.hours.sort((a, b) => a - b)
+    lines.push({ kind: 'court', title: `${c.court}号场`, date: cnDate(c.date), times: c.hours.map(hourRange), n: c.hours.length })
+  }
+  for (const p of products.values()) lines.push({ kind: 'product', title: p.title, n: p.n })
+  return lines
+}
+
+// 舊訂單沒有明細：把原來的摘要拆成一行一項（沒有圓圈）
+function legacyLines(summary) {
+  return String(summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 }))
+}
+
 module.exports = {
   HOUR, DAY, ok, fail, pad, dateStr, dayStart, slotStart, addDays, weekday, hourNow,
-  dateLabel, cnDate, hourRange, slotId, parseWxTime, toWxTime, formatFen, maskPhone,
+  dateLabel, cnDate, hourRange, orderLines, legacyLines, slotId, parseWxTime, toWxTime, formatFen, maskPhone,
   randomDigits, newId, COURTS: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 }
