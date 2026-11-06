@@ -57,7 +57,7 @@ Page({
     return raw.map((row, r) =>
       row.map((c, ci) => {
         if (c.s === 'past') return { cls: 'past', text: '' }
-        if (c.s === 'taken') return { cls: 'taken', text: '不可订' }
+        if (c.s === 'taken') return { cls: 'taken', text: '' }
         const sel = cart.hasCourt(date, this.data.courts[ci] || ci + 1, this.data.hours[r] ? this.data.hours[r].hour : 0)
         return { cls: sel ? 'sel' : 'free', text: formatFen(c.p) }
       })

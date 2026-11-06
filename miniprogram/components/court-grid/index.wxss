@@ -10,6 +10,11 @@
 .cell { width: 142rpx; height: 80rpx; margin: 6rpx 4rpx; border-radius: 12rpx; border: 1rpx solid #D9D9D9; background: #FFFFFF; color: #A6A6A6; font-weight: 400; }
 .cell.sel { background: #2B5AAE; border-color: #2B5AAE; color: #FFFFFF; }
 .cell.taken { background: #D9D9D9; border-color: #D9D9D9; color: #8C8C8C; font-weight: 400; }
+/* 已被訂／鎖定的格子：畫一個叉 */
+.cell.taken, .cell.locked { position: relative; }
+.cell.taken::before, .cell.taken::after { content: ''; position: absolute; left: 50%; top: 50%; width: 48rpx; height: 4rpx; border-radius: 2rpx; background: #8C8C8C; }
+.cell.taken::before { transform: translate(-50%, -50%) rotate(45deg); }
+.cell.taken::after { transform: translate(-50%, -50%) rotate(-45deg); }
 .cell.past { background: #F2F2F2; border-color: #F2F2F2; color: transparent; }
 .cell.locked { background: #D9D9D9; border-color: #D9D9D9; color: #666666; font-weight: 400; }
 .cell.booked { background: #E8EFFA; border-color: #E8EFFA; color: #2B5AAE; font-weight: 400; }
