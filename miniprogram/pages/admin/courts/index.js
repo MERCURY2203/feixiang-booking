@@ -11,10 +11,20 @@ Page({
   },
 
   onReady() {
-    const win = wx.getWindowInfo()
-    wx.createSelectorQuery().select('.grid-anchor').boundingClientRect(rect => {
-      if (rect) this.setData({ gridHeight: Math.max(240, win.windowHeight - rect.top - 80) })
-    }).exec()
+    this.measure()
+  },
+
+  // 表格高度 = 底部操作列的頂邊 − 表格的頂邊，剛好不被操作列蓋住（直接量，不猜數字）
+  measure() {
+    const q = wx.createSelectorQuery()
+    q.select('.grid-anchor').boundingClientRect()
+    q.select('.bottom-bar').boundingClientRect()
+    q.exec(res => {
+      const anchor = res && res[0]
+      const bar = res && res[1]
+      if (!anchor || !bar) return
+      this.setData({ gridHeight: Math.max(240, Math.floor(bar.top - anchor.top)) })
+    })
   },
 
   load(date) {
@@ -26,7 +36,7 @@ Page({
         this.setData({
           days: r.days, date: r.date, courts: r.courts, hours: r.hours, picked: 0,
           cells: r.cells.map(row => row.map(c => ({ ...LABEL[c.s] })))
-        })
+        }, () => this.measure())
       })
       .catch(err => api.toast(err.message))
   },
