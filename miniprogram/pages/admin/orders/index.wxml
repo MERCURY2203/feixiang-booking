@@ -22,10 +22,7 @@
     </view>
     <view class="ol-lines">
       <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}}">
-        <block wx:if="{{ln.kind === 'court'}}">
-          <view class="ol-date">{{ln.date}}</view>
-          <view wx:for="{{ln.rows}}" wx:for-item="r" wx:for-index="ri" wx:key="ri" class="ol-row"><text>{{r.time}}</text><text class="ol-court">{{r.court}}</text></view>
-        </block>
+        <view wx:if="{{ln.kind === 'courtRow'}}" class="ol-row"><text>{{ln.date}} {{ln.time}}</text><text class="ol-court">{{ln.court}}</text></view>
         <block wx:else>
           <view class="ol-title">{{ln.title}}</view>
           <view wx:if="{{ln.n}}" class="ol-n">×{{ln.n}}</view>

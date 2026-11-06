@@ -10,7 +10,16 @@ const TABS = [
   { key: 'refund', name: '退款' }
 ]
 
-const linesOf = o => o.lines || String(o.summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 }))
+// 後台訂單卡片不合併：每個場地時段單獨一行（日期、時段、場號），每種商品單獨一行
+const flatLines = lines => {
+  const out = []
+  for (const ln of lines) {
+    if (ln.kind === 'court') ln.rows.forEach(r => out.push({ kind: 'courtRow', date: ln.date, time: r.time, court: r.court }))
+    else out.push(ln)
+  }
+  return out
+}
+const linesOf = o => flatLines(o.lines || String(o.summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 })))
 
 Page({
   data: { tabs: TABS, tab: 'all', keyword: '', date: '', list: [], more: false, loaded: false },
