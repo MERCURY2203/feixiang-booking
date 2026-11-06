@@ -15,4 +15,8 @@
 .cell.taken::before, .cell.taken::after, .cell.past::before, .cell.past::after { content: ''; position: absolute; left: 50%; top: 50%; width: 48rpx; height: 4rpx; border-radius: 2rpx; background: #C8C8C8; }
 .cell.taken::before, .cell.past::before { transform: translate(-50%, -50%) rotate(45deg); }
 .cell.taken::after, .cell.past::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.cell.past { background: #F2F2F2; border-color: #F2F2F2; color: transparent; }
+.cell.locked { background: #F2F2F2; border-color: #F2F2F2; color: #8C8C8C; font-weight: 400; }
+.cell.booked { background: #E8EFFA; border-color: #E8EFFA; color: #2B5AAE; font-weight: 400; }
+.cell.special { background: #E8EFFA; border-color: #2B5AAE; color: #2B5AAE; font-weight: 600; }
 .tail { height: 40rpx; }
