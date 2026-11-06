@@ -63,3 +63,8 @@ page {
 .ol-court { font-weight: 600; }
 .ol-title { font-size: 30rpx; font-weight: 600; }
 .ol-n { position: absolute; top: 14rpx; right: 0; min-width: 64rpx; height: 64rpx; padding: 0 8rpx; box-sizing: border-box; border: 3rpx solid var(--primary); border-radius: 50%; color: var(--primary); font-size: 28rpx; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+
+/* 活動商品：每一項是訂單卡片裡一張獨立的小卡片 */
+.ol-line.prod { margin: 16rpx 0; padding: 20rpx 24rpx; border: 2rpx solid var(--border); border-radius: 16rpx; background: #F7F9FD; }
+.ol-line.prod.has-n { padding-right: 112rpx; }
+.ol-line.prod .ol-n { top: 50%; right: 24rpx; margin-top: -32rpx; }

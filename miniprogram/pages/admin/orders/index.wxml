@@ -21,7 +21,7 @@
       <text class="status">{{item.statusText}}</text>
     </view>
     <view class="ol-lines">
-      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}}">
+      <view wx:for="{{item.lines}}" wx:for-item="ln" wx:for-index="li" wx:key="li" class="ol-line {{ln.n ? 'has-n' : ''}} {{ln.kind === 'court' || ln.kind === 'courtRow' ? '' : 'prod'}}">
         <view wx:if="{{ln.kind === 'courtRow'}}" class="ol-row"><text>{{ln.date}} {{ln.time}}</text><text class="ol-court">{{ln.court}}</text></view>
         <block wx:else>
           <view class="ol-title">{{ln.title}}</view>
