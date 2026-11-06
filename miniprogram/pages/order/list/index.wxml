@@ -28,7 +28,8 @@
       <text wx:else></text>
       <text class="amount">{{cd.totalText}}</text>
     </view>
-    <view wx:if="{{o.status === 'pending'}}" class="actions" catchtap="noop">
+    <view wx:if="{{o.status === 'pending' && ci === o.cards.length - 1}}" class="actions" catchtap="noop">
+      <text wx:if="{{o.cards.length > 1}}" class="left">待付合计 {{o.totalText}}</text>
       <button class="btn btn-danger mini" data-index="{{index}}" catchtap="cancel">取消订单</button>
       <button class="btn btn-primary mini" data-index="{{index}}" catchtap="pay">去支付</button>
     </view>

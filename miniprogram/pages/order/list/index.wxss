@@ -10,3 +10,5 @@
 .amount { font-weight: 600; font-size: 34rpx; }
 .actions { display: flex; gap: 20rpx; justify-content: flex-end; margin-top: 20rpx; }
 .mini { height: 72rpx; font-size: 28rpx; width: 200rpx; }
+
+.actions .left { margin-right: auto; align-self: center; }
