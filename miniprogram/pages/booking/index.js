@@ -26,7 +26,10 @@ Page({
 
   onShow() {
     this.setData({ cartCount: cart.count() })
-    if (this.data.loaded) this.load(false)
+    if (this.data.loaded) {
+      this.measure()
+      this.load(false)
+    }
     this.timer = setInterval(() => this.load(false), REFRESH_MS)
   },
 
@@ -45,7 +48,7 @@ Page({
   measure() {
     const win = wx.getWindowInfo()
     wx.createSelectorQuery().select('.grid-anchor').boundingClientRect(rect => {
-      if (rect) this.setData({ gridHeight: Math.max(240, win.windowHeight - rect.top) })
+      if (rect) this.setData({ gridHeight: Math.max(240, Math.floor(win.windowHeight - rect.top)) })
     }).exec()
   },
 
@@ -83,8 +86,8 @@ Page({
           update.courts = res.courts
           update.hours = res.hours
           this.setData(update)
-          this.setData({ cells: this.view(res.cells, res.date), loaded: true })
-          if (first) this.measure()
+          // 畫面（含橫幅）排好之後再量表格該有多高，否則量早了表格會比螢幕長
+          this.setData({ cells: this.view(res.cells, res.date), loaded: true }, () => this.measure())
           return
         }
         // 輪詢刷新：只更新有變化的格子
@@ -98,7 +101,8 @@ Page({
         )
         if (res.days.length !== this.data.days.length || (res.days[0] && res.days[0].date !== this.data.days[0].date)) diff.days = res.days
         if (update.banners) diff.banners = update.banners
-        if (Object.keys(diff).length) this.setData(diff)
+        // 橫幅出現或消失會改變表格上方的高度，要重新量
+        if (Object.keys(diff).length) this.setData(diff, () => diff.banners && this.measure())
       })
       .catch(err => {
         if (first) api.toast(err.message)
