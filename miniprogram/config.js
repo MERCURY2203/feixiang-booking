@@ -3,5 +3,13 @@ module.exports = {
   // 雲開發環境 ID（例如 'cloud1-xxxxxxx'）
   CLOUD_ENV: 'cloud1-d8g2j3h1w2834f1f8',
   // 訂閱消息模板 ID：「超时已退款」通知；在小程序後台「訂閱消息」申請後填入，留空則不請求授權
-  TPL_TIMEOUT_REFUND: ''
+  TPL_TIMEOUT_REFUND: '',
+  // 協議文本裡的公司資料（上線前填好；留空的項目不會顯示在協議裡）
+  LEGAL: {
+    effectiveDate: '', // 生效日期，例如 '2026年11月10日'
+    address: '', // 公司註冊地址
+    contact: '', // 客人諮詢的聯繫方式，例如電話或郵箱
+    officer: '', // 個人信息保護負責人，例如 '唐先生，電話xxx'
+    court: '' // 爭議管轄法院所在地，例如 '广州市'
+  }
 }

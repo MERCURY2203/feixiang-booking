@@ -10,6 +10,7 @@
     "pages/order/list/index",
     "pages/order/detail/index",
     "pages/bind/index",
+    "pages/legal/index",
     "pages/admin/home/index",
     "pages/admin/verify-logs/index",
     "pages/admin/orders/index",

@@ -1,0 +1,8 @@
+<view class="doc">
+  <view class="title">{{title}}</view>
+  <view wx:for="{{sections}}" wx:key="index" class="section">
+    <view wx:if="{{item.h}}" class="h">{{item.h}}</view>
+    <text wx:for="{{item.p}}" wx:for-item="line" wx:key="*this" class="p" user-select>{{line}}</text>
+  </view>
+  <view class="tail"></view>
+</view>

@@ -69,10 +69,9 @@ Page({
   },
 
   openDocs() {
-    wx.showModal({
-      title: '用户协议与隐私政策',
-      content: '正式文本待球馆提供并经法律人士审阅后填入。',
-      showCancel: false
+    wx.showActionSheet({
+      itemList: ['用户协议', '隐私政策'],
+      success: res => wx.navigateTo({ url: `/pages/legal/index?type=${res.tapIndex === 0 ? 'agreement' : 'privacy'}` })
     })
   },
 

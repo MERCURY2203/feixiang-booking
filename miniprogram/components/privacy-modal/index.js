@@ -18,12 +18,7 @@ Component({
       this.setData({ checked: !this.data.checked })
     },
     openDoc(e) {
-      const type = e.currentTarget.dataset.type
-      wx.showModal({
-        title: type === 'privacy' ? '隐私政策' : '用户协议',
-        content: '正式文本待球馆提供并经法律人士审阅后填入。',
-        showCancel: false
-      })
+      wx.navigateTo({ url: `/pages/legal/index?type=${e.currentTarget.dataset.type}` })
     },
     // 按鈕使用微信官方隱私授權（open-type="agreePrivacyAuthorization"）
     onAgree() {
