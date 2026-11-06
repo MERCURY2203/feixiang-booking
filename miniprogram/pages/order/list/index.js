@@ -3,6 +3,8 @@ const api = require('../../../utils/api')
 const { formatFen } = require('../../../utils/money')
 const { now, syncServerTime, formatBeijing } = require('../../../utils/time')
 
+const linesOf = o => o.lines || String(o.summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 }))
+
 const TABS = [
   { key: 'all', name: '全部' },
   { key: 'pending', name: '待支付' },
@@ -50,6 +52,7 @@ Page({
         syncServerTime(res.serverNow)
         const rows = res.list.map(o => ({
           ...o,
+          lines: linesOf(o),
           totalText: formatFen(o.totalFee),
           created: formatBeijing(o.createdAt),
           left: ''

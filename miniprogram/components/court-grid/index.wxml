@@ -8,6 +8,6 @@
       <view class="tcell">{{h.label}}</view>
       <view wx:for="{{cells[r]}}" wx:for-item="c" wx:for-index="ci" wx:key="ci" class="cell {{c.cls}}" data-r="{{r}}" data-c="{{ci}}" bindtap="onTap">{{c.text}}</view>
     </view>
-    <view class="tail"></view>
+    <view class="tail" style="height: {{tail}}rpx"></view>
   </view>
 </scroll-view>

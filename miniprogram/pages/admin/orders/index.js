@@ -10,6 +10,8 @@ const TABS = [
   { key: 'refund', name: '退款' }
 ]
 
+const linesOf = o => o.lines || String(o.summary || '').split('；').filter(Boolean).map(t => ({ kind: 'text', title: t, n: 0 }))
+
 Page({
   data: { tabs: TABS, tab: 'all', keyword: '', date: '', list: [], more: false, loaded: false },
 
@@ -26,7 +28,7 @@ Page({
     api
       .call('admin', 'orders', { keyword: this.data.keyword, date: this.data.date, tab: this.data.tab, skip })
       .then(r => {
-        const rows = r.list.map(o => ({ ...o, totalText: formatFen(o.totalFee) }))
+        const rows = r.list.map(o => ({ ...o, lines: linesOf(o), totalText: formatFen(o.totalFee) }))
         this.setData({ list: reset ? rows : this.data.list.concat(rows), more: r.more, loaded: true })
       })
       .catch(err => api.toast(err.message))

@@ -4,7 +4,7 @@
 </scroll-view>
 <view class="legend muted">点格子选择，可多选 · 已订和待支付的格子不能锁</view>
 <view class="grid-anchor"></view>
-<court-grid courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" bind:celltap="onCellTap" />
+<court-grid courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" tail="{{120}}" bind:celltap="onCellTap" />
 <view class="bottom-bar">
   <button class="btn btn-secondary" bindtap="clearPick">清空选择</button>
   <button class="btn btn-secondary" disabled="{{!picked}}" data-lock="0" bindtap="submit">解锁</button>
