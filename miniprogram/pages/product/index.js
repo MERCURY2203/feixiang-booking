@@ -50,6 +50,6 @@ Page({
 
   buyNow() {
     if (this.data.p.stock <= 0) return
-    checkout.start(this, [{ type: 'product', productId: this.data.p._id, qty: this.data.qty }])
+    checkout.start(this, [{ type: 'product', productId: this.data.p._id, qty: this.data.qty }], { expectTotal: this.data.p.price * this.data.qty })
   }
 })

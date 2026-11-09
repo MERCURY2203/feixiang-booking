@@ -5,6 +5,7 @@
 // 4. 打完的場地卡片標為「已使用」，更新訂單狀態
 // 5. 固定日期活動過期：未使用張數自動全額退款
 // 6. 每天凌晨 3 點：最後一次訂場超過 1 年的客人，自動刪除手機號、頭像、暱稱（訂單和核銷記錄裡的手機號一併刪除）
+// 7. 同一時間（凌晨 3 點）：日誌保留 1 年；訂單滿 3 年後匿名化
 // 每項任務分批處理，整次執行最多約 50 秒，做不完的下一分鐘繼續
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -64,11 +65,14 @@ async function retryRefunds(now) {
 
 async function confirmRefunds(now) {
   const res = await db.collection('refunds')
-    .where({ status: 'success', wxState: 'ACCEPTED', doneAt: _.lt(now - 2 * 60 * 1000).and(_.gt(now - 30 * u.DAY)) })
+    .where(_.and([
+      { status: 'success', wxState: 'ACCEPTED', doneAt: _.lt(now - 2 * 60 * 1000).and(_.gt(now - 30 * u.DAY)) },
+      // 剛查過的（處理中）先排除在查詢外，否則它們會佔滿前 20 名，擋住後面的異常退款
+      _.or([{ wxCheckedAt: _.exists(false) }, { wxCheckedAt: _.lt(now - 10 * 60 * 1000) }])
+    ]))
     .orderBy('doneAt', 'asc').limit(20).get()
   for (const r of res.data) {
     if (!timeLeft()) break
-    if (r.wxCheckedAt && now - r.wxCheckedAt < 10 * 60 * 1000) continue // 處理中的每 10 分鐘查一次
     try {
       await ord.confirmRefund(cloud, db, r._id)
     } catch (e) {
@@ -100,6 +104,7 @@ async function expireProducts(now) {
   for (const it of res.data) {
     if (!timeLeft()) break
     if (it.refunding) continue // 有退款在處理，下一輪再看
+    if (it.expireRefundFailAt && now - it.expireRefundFailAt < 60 * 60 * 1000) continue // 剛失敗過，1 小時後再試，避免每分鐘重複通知
     const available = ord.productAvailable(it)
     if (available <= 0) {
       await db.collection('order_items').doc(it._id).update({ data: { codeActive: false } })
@@ -121,6 +126,7 @@ async function expireProducts(now) {
         await db.collection('order_items').doc(it._id).update({ data: { codeActive: false } })
       } else {
         console.error('expireProducts', it._id, e)
+        await db.collection('order_items').doc(it._id).update({ data: { expireRefundFailAt: now } }).catch(() => {})
       }
     }
   }
@@ -148,6 +154,30 @@ async function purgePhones(now) {
   }
 }
 
+// 資料到期處理（隱私政策「信息存在哪裡，保存多久」）：
+// - 管理操作日誌、通知記錄：保留 1 年（網絡安全法要求至少 6 個月），之後刪除
+// - 訂單：交易記錄保存 3 年（電子商務法），之後匿名化——清掉手機號、微信身份和客人編號，只保留金額和明細供報表使用
+async function purgeOld(now) {
+  const logCut = now - 365 * u.DAY
+  for (const name of ['audit_logs', 'notices']) {
+    for (let n = 0; n < 20 && timeLeft(); n++) {
+      const r = await db.collection(name).where({ at: _.lt(logCut) }).remove()
+      if (!r.stats || !r.stats.removed) break
+    }
+  }
+  const orderCut = now - 3 * 365 * u.DAY
+  while (timeLeft()) {
+    const res = await db.collection('orders')
+      .where(_.and([{ createdAt: _.lt(orderCut) }, { anonymizedAt: _.exists(false) }, { status: _.neq('pending') }, { status: _.neq('active') }]))
+      .limit(100).get()
+    if (!res.data.length) break
+    const ids = res.data.map(o => o._id)
+    await db.collection('order_items').where({ orderId: _.in(ids) }).update({ data: { userId: '' } })
+    await db.collection('verify_logs').where({ orderId: _.in(ids) }).update({ data: { phone: '', userId: '' } })
+    await db.collection('orders').where({ _id: _.in(ids) }).update({ data: { phone: '', openid: '', userId: '', anonymizedAt: now } })
+  }
+}
+
 exports.main = async () => {
   const now = Date.now()
   deadline = now + BUDGET_MS
@@ -160,7 +190,10 @@ exports.main = async () => {
     ['expireProducts', () => expireProducts(now)]
   ]
   const d = new Date(now + 8 * u.HOUR)
-  if (d.getUTCHours() === 3 && d.getUTCMinutes() < 10) tasks.push(['purgePhones', () => purgePhones(now)])
+  if (d.getUTCHours() === 3 && d.getUTCMinutes() < 10) {
+    tasks.push(['purgePhones', () => purgePhones(now)])
+    tasks.push(['purgeOld', () => purgeOld(now)])
+  }
   for (const [name, fn] of tasks) {
     if (!timeLeft()) break
     try {

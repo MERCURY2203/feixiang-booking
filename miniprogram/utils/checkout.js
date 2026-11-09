@@ -37,7 +37,7 @@ function afterPay(orderId, paid) {
 
 // items：[{ type:'court', date, court, hour } | { type:'product', productId, qty }]
 // 返回 { ok, invalid }
-async function start(page, items, { fromCart } = {}) {
+async function start(page, items, { fromCart, expectTotal } = {}) {
   const hasCourt = items.some(i => i.type === 'court')
   if (hasCourt) {
     await modal({
@@ -59,7 +59,7 @@ async function start(page, items, { fromCart } = {}) {
   wx.showLoading({ title: '提交中', mask: true })
   let res
   try {
-    res = await api.call('booking', 'checkout', { items })
+    res = await api.call('booking', 'checkout', { items, expectTotal })
   } catch (err) {
     wx.hideLoading()
     if (err.code === 'HAS_PENDING') {
@@ -71,6 +71,10 @@ async function start(page, items, { fromCart } = {}) {
         api.toast('旧订单已取消，请重新结算')
       }
       return { ok: false }
+    }
+    if (err.code === 'PRICE_CHANGED') {
+      await modal({ title: '价格已变动', content: err.message, showCancel: false, confirmText: '我知道了' })
+      return { ok: false, invalid: true }
     }
     api.toast(err.message)
     return { ok: false, invalid: err.code === 'INVALID_ITEMS' }

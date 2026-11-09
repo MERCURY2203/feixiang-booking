@@ -548,6 +548,88 @@ test('訂單明細：場地按日期分組、每個時段一行（時段＋場�
   assert(old.list[0].lines.length === 2 && old.list[0].lines[0].n === 0)
 })
 
+// ---------------- Codex 檢查報告（2026-11-11）C1–C6 ----------------
+
+test('C1 客人確認的合計與現價不一致：不下單，要求重新確認', async () => {
+  mustFail(await call(booking, 'oA', { action: 'checkout', items: [product('p1', 1)], expectTotal: 3000 }), /价格已变动/)
+  assert.strictEqual(all('orders').length, 0)
+  assert.strictEqual(doc('products', 'p1').stock, 10)
+  const ok = must(await call(booking, 'oA', { action: 'checkout', items: [product('p1', 2)], expectTotal: 10000 }))
+  assert.strictEqual(doc('orders', ok.orderId).totalFee, 10000)
+})
+
+test('C2 本地已建單但微信沒有這張單：逾時後釋放場地，客人可再下單', async () => {
+  const o = must(await checkout('oA', [court(4, 10)]))
+  delete wechat.orders[o.orderId] // 模擬向微信下單前中斷
+  clock.now += 6 * MIN
+  await runTimer()
+  assert.strictEqual(doc('orders', o.orderId).status, 'closed')
+  assert.strictEqual(doc('slot_locks', `${D}_4_10`), null)
+  must(await checkout('oA', [court(4, 10)]))
+})
+
+test('C3 前 20 筆退款還在處理中，第 21 筆異常退款照樣會被查到', async () => {
+  const ids = []
+  for (let n = 0; n < 21; n++) {
+    const id = await buy('oA', [court(1 + (n % 10), 9 + Math.floor(n / 10))])
+    ids.push(id)
+    clock.now += 1000
+    must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: itemsOf(id)[0]._id }))
+    wechat.refundStatus[`${id}R01`] = n === 20 ? 'CHANGE' : 'PROCESSING'
+  }
+  clock.now += 3 * MIN
+  await runTimer() // 第一輪：最舊的 20 筆（處理中）
+  await runTimer() // 第二輪：剛查過的不再佔名額，輪到第 21 筆
+  assert.strictEqual(doc('refunds', `${ids[20]}R01`).wxState, 'ABNORMAL')
+  assert(all('notices').some(n => /退款异常/.test(n.text)))
+})
+
+test('C4 微信拒絕自動退款（餘額不足）不耗用退款次數，恢復後仍能退成功', async () => {
+  const id = await buy('oA', [product('p2', 2)])
+  const it = itemsOf(id)[0]
+  clock.now = Date.UTC(2026, 10, 12, 2, 0, 0)
+  wechat.rejectRefunds = true
+  await runTimer()
+  assert.strictEqual(doc('orders', id).refundCount || 0, 0)
+  assert.strictEqual(doc('order_items', it._id).refunding || '', '')
+  // 剛失敗過：1 小時內不重複嘗試、不重複通知
+  const n1 = all('notices').length
+  clock.now += 5 * MIN
+  await runTimer()
+  assert.strictEqual(all('notices').length, n1)
+  // 餘額恢復、1 小時後重試成功
+  wechat.rejectRefunds = false
+  clock.now += 61 * MIN
+  await runTimer()
+  assert.strictEqual(wechat.refundedTotal(id), 2 * 8800)
+  assert.strictEqual(doc('order_items', it._id).expiredQty, 2)
+})
+
+test('C6 登入不建立用戶資料；同意協議後才建立並記下版本', async () => {
+  const r = must(await call(user, 'oNew', { action: 'login' }))
+  assert.strictEqual(r.user._id, '')
+  assert.strictEqual(all('users').filter(x => x.openid === 'oNew').length, 0)
+  must(await call(user, 'oNew', { action: 'agreePrivacy', version: '2026-11-06' }))
+  const u = all('users').find(x => x.openid === 'oNew')
+  assert(u && u.agreedPrivacyVersion === '2026-11-06')
+})
+
+test('C5 資料到期：滿 3 年的訂單匿名化、1 年前的日誌刪除，較新的不動', async () => {
+  const id = await buy('oA', [court(2, 10)])
+  const it = itemsOf(id)[0]
+  store.write('orders', id, { ...doc('orders', id), status: 'completed' })
+  store.write('audit_logs', 'old', { actorId: 'x', action: 'a', at: BASE })
+  store.write('audit_logs', 'new', { actorId: 'x', action: 'a', at: Date.UTC(2029, 9, 1) })
+  clock.now = Date.UTC(2029, 10, 12, 19, 0, 0) // 約 3 年後的凌晨 3 點
+  await runTimer()
+  const o = doc('orders', id)
+  assert(o.phone === '' && o.openid === '' && o.userId === '' && o.anonymizedAt)
+  assert.strictEqual(o.totalFee, it.price) // 金額保留
+  assert.strictEqual(doc('order_items', it._id).userId, '')
+  assert.strictEqual(doc('audit_logs', 'old'), null)
+  assert(doc('audit_logs', 'new'))
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

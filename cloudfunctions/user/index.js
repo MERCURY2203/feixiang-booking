@@ -14,7 +14,8 @@ function publicUser(u) {
     nickname: u.nickname || '',
     avatar: u.avatar || '',
     phone: u.phone || '',
-    agreedPrivacyAt: u.agreedPrivacyAt || null
+    agreedPrivacyAt: u.agreedPrivacyAt || null,
+    agreedPrivacyVersion: u.agreedPrivacyVersion || ''
   }
 }
 
@@ -56,14 +57,18 @@ exports.main = async event => {
   if (!OPENID) return fail('请在小程序内使用', 'NO_OPENID')
 
   try {
+    // 登入只查詢、不建立用戶：客人同意協議（agreePrivacy）之後才建立含 OpenID 的用戶資料
+    if (event.action === 'login') {
+      const found = await users.where({ openid: OPENID }).limit(1).get()
+      const u = found.data[0]
+      return ok({ serverNow: Date.now(), user: u ? publicUser(u) : { _id: '', role: 'customer', nickname: '', avatar: '', phone: '', agreedPrivacyAt: null, agreedPrivacyVersion: '' } })
+    }
+
     const user = await getOrCreate(OPENID)
 
     switch (event.action) {
-      case 'login':
-        return ok({ serverNow: Date.now(), user: publicUser(user) })
-
       case 'agreePrivacy':
-        await users.doc(user._id).update({ data: { agreedPrivacyAt: Date.now() } })
+        await users.doc(user._id).update({ data: { agreedPrivacyAt: Date.now(), agreedPrivacyVersion: String(event.version || '').slice(0, 20) } })
         return ok(true)
 
       case 'bindPhone': {

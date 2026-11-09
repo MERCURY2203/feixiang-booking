@@ -67,9 +67,12 @@ Page({
   },
 
   load(first, date) {
+    // 每次請求編號：晚到的舊回應（例如切日期前發出的自動刷新）直接丟掉，不能把畫面蓋回舊日期
+    const seq = (this.seq = (this.seq || 0) + 1)
     return api
       .call('booking', 'schedule', { date: date || this.data.date, withBanners: true })
       .then(res => {
+        if (seq !== this.seq) return
         syncServerTime(res.serverNow)
         this.raw = res.cells
         const update = {}
@@ -107,7 +110,7 @@ Page({
         if (Object.keys(diff).length) this.setData(diff, () => diff.banners && this.measure())
       })
       .catch(err => {
-        if (first) api.toast(err.message)
+        if (first && seq === this.seq) api.toast(err.message)
       })
   },
 

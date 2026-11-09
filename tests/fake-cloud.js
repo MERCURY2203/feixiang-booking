@@ -282,13 +282,14 @@ const db = makeDb(store)
 
 // ---------- 假微信支付 ----------
 const wechat = {
-  orders: {}, refunds: {}, refundCalls: [], loseNextRefundResponse: false, refundHook: null, refundStatus: {},
+  orders: {}, refunds: {}, refundCalls: [], loseNextRefundResponse: false, refundHook: null, refundStatus: {}, rejectRefunds: false,
   reset() {
     this.orders = {}
     this.refunds = {}
     this.refundCalls = []
     this.loseNextRefundResponse = false
     this.refundHook = null // 退款受理後、回覆前調用，可用來模擬回覆延遲或丟失
+    this.rejectRefunds = false // 模擬商戶餘額不足：微信明確拒絕退款
     this.refundStatus = {} // 退款單號 → 退款查詢返回的狀態（默認 SUCCESS）
   },
   // 客人在微信裡付款成功
@@ -340,6 +341,7 @@ const cloudPay = {
   async refund({ outTradeNo, outRefundNo, refundFee, totalFee }) {
     await tick()
     wechat.refundCalls.push(outRefundNo)
+    if (wechat.rejectRefunds) return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'NOTENOUGH', errCodeDes: '商户余额不足' }
     const o = wechat.orders[outTradeNo]
     if (!o || o.state !== 'SUCCESS') return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'TRADE_STATE_ERROR' }
     if (totalFee !== o.totalFee) return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'PARAM_ERROR' }

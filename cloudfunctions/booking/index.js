@@ -145,7 +145,7 @@ function newCodes(n) {
   return [...set]
 }
 
-async function checkout(user, rawItems) {
+async function checkout(user, rawItems, expectTotal) {
   if (!user.phone) return u.fail('必须授权手机号才可下单购买哦', 'NEED_PHONE')
   if (!Array.isArray(rawItems) || !rawItems.length) return u.fail('购物车是空的')
 
@@ -182,6 +182,12 @@ async function checkout(user, rawItems) {
   const q = await quote(items)
   const invalid = q.filter(i => !i.valid)
   if (invalid.length) return u.fail(invalid[0].reason === '已被预订' ? '部分场次已被预订' : '部分商品不可购买', 'INVALID_ITEMS', { invalid })
+
+  // 客人確認的合計和現在的報價不一致（確認期間改了價）：不下單，讓客人重新確認（澄清 B4）
+  const quotedTotal = q.reduce((s, i) => s + i.price * i.qty, 0)
+  if (Number.isFinite(expectTotal) && expectTotal !== quotedTotal) {
+    return u.fail(`价格已变动，新合计 ${u.formatFen(quotedTotal)}，请重新确认`, 'PRICE_CHANGED', { total: quotedTotal })
+  }
 
   const created = Date.now()
   const order = {
@@ -442,7 +448,7 @@ exports.main = async event => {
 
     switch (event.action) {
       case 'checkout':
-        return await checkout(user, event.items)
+        return await checkout(user, event.items, event.expectTotal)
 
       case 'orderStatus': {
         let o = await loadOwnOrder(user, event.orderId)

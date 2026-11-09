@@ -63,7 +63,8 @@ async function closeOrder(cloud, order) {
   if (MOCK) return true
   const res = await cloud.cloudPay.closeOrder({ subMchId: MCH_ID, outTradeNo: order._id, nonceStr: nonce() })
   if (res.returnCode !== 'SUCCESS') throw new Error('closeOrder failed')
-  return res.resultCode === 'SUCCESS' || res.errCode === 'ORDERCLOSED'
+  // 微信那邊根本沒有這張單（本地建單後、向微信下單前中斷）：沒有可關的單，視為已關
+  return res.resultCode === 'SUCCESS' || res.errCode === 'ORDERCLOSED' || res.errCode === 'ORDERNOTEXIST'
 }
 
 // 退款：outRefundNo 由調用方事先固定並保存；網絡異常時用同一個單號重試，微信只會退一次

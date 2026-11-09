@@ -1,14 +1,15 @@
 // 首次打開：隱私政策與用戶協議彈窗，必須勾選同意才能使用（規格書「首次打開」）
 // 同意後接著請求授權手機號；拒絕手機號也可以瀏覽（規格書「手機號」）
 const api = require('../../utils/api')
-const STORAGE_KEY = 'privacyAgreedV1'
+const { PRIVACY_VERSION } = require('../../config')
+const STORAGE_KEY = 'privacyAgreedVersion'
 
 Component({
   data: { show: false, step: 'agree', checked: false },
 
   lifetimes: {
     attached() {
-      if (!wx.getStorageSync(STORAGE_KEY)) this.setData({ show: true, step: 'agree' })
+      if (wx.getStorageSync(STORAGE_KEY) !== PRIVACY_VERSION) this.setData({ show: true, step: 'agree' })
     }
   },
 
@@ -26,9 +27,18 @@ Component({
         api.toast('请先勾选同意用户协议与隐私政策')
         return
       }
-      wx.setStorageSync(STORAGE_KEY, Date.now())
-      api.call('user', 'agreePrivacy').catch(() => {})
-      this.setData({ step: 'phone' })
+      // 先讓伺服器記下同意，成功了才放行；寫入失敗要讓客人重試，不能先放行
+      if (this.agreeing) return
+      this.agreeing = true
+      api
+        .call('user', 'agreePrivacy', { version: PRIVACY_VERSION })
+        .then(() => {
+          wx.setStorageSync(STORAGE_KEY, PRIVACY_VERSION)
+          getApp().refreshUser().catch(() => {})
+          this.setData({ step: 'phone' })
+        })
+        .catch(() => api.toast('网络不太好，请再点一次“同意并继续”'))
+        .finally(() => (this.agreeing = false))
     },
     onDisagree() {
       wx.showModal({

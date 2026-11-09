@@ -119,7 +119,7 @@ Page({
       return
     }
     const items = valid.map(i => (i.type === 'court' ? { type: 'court', date: i.date, court: i.court, hour: i.hour } : { type: 'product', productId: i.productId, qty: i.qty }))
-    const r = await checkout.start(this, items, { fromCart: true })
+    const r = await checkout.start(this, items, { fromCart: true, expectTotal: this.data.total })
     if (r.invalid) this.refresh()
   }
 })

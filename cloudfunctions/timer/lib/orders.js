@@ -469,6 +469,8 @@ async function abortRefund(db, outRefundNo, error) {
         if (it && it.refunding === outRefundNo) writes.push(it._id)
       }
       for (const id of writes) await t.collection('order_items').doc(id).update({ data: { refunding: '', refundingQty: 0, refundingFee: 0 } })
+      // 微信沒有受理，這次不算退款次數（預留時加的 1 次要還回去），否則失敗重試會把 50 次額度耗光
+      await t.collection('orders').doc(order._id).update({ data: { refundCount: Math.max(0, (order.refundCount || 0) - 1) } })
     }
     await t.collection('refunds').doc(outRefundNo).update({ data: { status: 'failed', error: String(error || '').slice(0, 200), doneAt: Date.now() } })
     return r
