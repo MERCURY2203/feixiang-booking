@@ -651,7 +651,12 @@ async function buildReport({ mode, from, to }) {
     items.push(...(await cal.getAll(db.collection('order_items'), { orderId: _.in(orderIds.slice(i, i + 100)) })))
   }
   const payTimeOf = Object.fromEntries(orders.map(o => [o._id, o.payTime]))
-  const refunds = (await cal.getAll(db.collection('refunds'), { status: 'success', at: _.gte(start).and(_.lt(end)) }))
+  // 退款按「微信受理、系統記帳」那天（doneAt）歸日；舊記錄沒有 doneAt 才用申請時間 at（澄清 H7）
+  const inRange = _.gte(start).and(_.lt(end))
+  const refunds = (await cal.getAll(db.collection('refunds'), _.and([
+    { status: 'success' },
+    _.or([{ doneAt: inRange }, { doneAt: _.exists(false), at: inRange }])
+  ])))
     .filter(r => r.kind !== 'timeout' && (r.by !== 'system' || r.reason !== '超时付款自动退款'))
 
   const rows = {}
@@ -661,7 +666,7 @@ async function buildReport({ mode, from, to }) {
     if (it.kind === 'court') r.court += it.price
     else r.product += it.price * it.qty
   }
-  for (const rf of refunds) row(periodKey(rf.at, mode)).refund += rf.amount
+  for (const rf of refunds) row(periodKey(rf.doneAt || rf.at, mode)).refund += rf.amount
 
   // 使用率：按打球日，期內所有有效（未全額退款）的場地卡片
   const cfg = await cal.loadConfig(db)

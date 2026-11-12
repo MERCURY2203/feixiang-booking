@@ -11,23 +11,33 @@ Page({
     this.orderId = options.id
   },
 
+  // 頁面每次顯示算一「代」；離開時代數加一，之前發出的查單回來後一律不理會（澄清 H6）
   onShow() {
+    this.gen = (this.gen || 0) + 1
     this.load()
   },
 
   onHide() {
-    clearInterval(this.timer)
+    this.stop()
   },
 
   onUnload() {
+    this.stop()
+  },
+
+  stop() {
+    this.gen = (this.gen || 0) + 1
     clearInterval(this.timer)
+    clearTimeout(this.retryTimer)
   },
 
   load() {
     if (!this.orderId) return
+    const gen = this.gen
     api
       .call('booking', 'pendingDetail', { orderId: this.orderId })
       .then(res => {
+        if (gen !== this.gen) return
         syncServerTime(res.serverNow)
         const o = res.order
         if (o.status === 'active' || o.status === 'completed') {
@@ -43,7 +53,7 @@ Page({
         })
         if (o.status === 'pending') this.startTimer()
       })
-      .catch(err => api.toast(err.message))
+      .catch(err => gen === this.gen && api.toast(err.message))
   },
 
   startTimer() {
@@ -65,19 +75,25 @@ Page({
 
   // 倒計時歸零：由雲函數查單、關單後返回結果
   check() {
+    const gen = this.gen
+    const retry = () => {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = setTimeout(() => gen === this.gen && this.check(), 3000)
+    }
     api
       .call('booking', 'orderStatus', { orderId: this.orderId, check: true })
       .then(o => {
+        if (gen !== this.gen) return // 已離開本頁，不再跳轉、不再重試
         if (o.status === 'active' || o.status === 'completed') {
           wx.redirectTo({ url: `/pages/order/result/index?id=${o._id}` })
         } else if (o.status === 'pending') {
           this.setData({ confirming: true })
-          setTimeout(() => this.check(), 3000)
+          retry()
         } else {
           this.setData({ closed: true, confirming: false, 'order.statusText': o.statusText })
         }
       })
-      .catch(() => setTimeout(() => this.check(), 3000))
+      .catch(() => gen === this.gen && retry())
   },
 
   continuePay() {

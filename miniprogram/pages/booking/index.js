@@ -69,8 +69,10 @@ Page({
   load(first, date) {
     // 每次請求編號：晚到的舊回應（例如切日期前發出的自動刷新）直接丟掉，不能把畫面蓋回舊日期
     const seq = (this.seq = (this.seq || 0) + 1)
+    // 客人點了新日期後，畫面在回應回來前還是舊日期；自動刷新要查客人最後點的日期，不能查畫面上的舊日期（澄清 H5）
+    if (date) this.wantDate = date
     return api
-      .call('booking', 'schedule', { date: date || this.data.date, withBanners: true })
+      .call('booking', 'schedule', { date: date || this.wantDate || this.data.date, withBanners: true })
       .then(res => {
         if (seq !== this.seq) return
         syncServerTime(res.serverNow)
@@ -86,6 +88,7 @@ Page({
           update.banners = banners
         }
         if (first || dateChanged) {
+          this.wantDate = res.date
           update.days = res.days
           update.date = res.date
           update.courts = res.courts
@@ -116,7 +119,7 @@ Page({
 
   pickDate(e) {
     const date = e.currentTarget.dataset.date
-    if (date === this.data.date) return
+    if (date === (this.wantDate || this.data.date)) return
     this.load(false, date)
   },
 

@@ -5,7 +5,7 @@
 // 4. 打完的場地卡片標為「已使用」，更新訂單狀態
 // 5. 固定日期活動過期：未使用張數自動全額退款
 // 6. 每天凌晨 3 點：最後一次訂場超過 1 年的客人，自動刪除手機號、頭像、暱稱（訂單和核銷記錄裡的手機號一併刪除）
-// 7. 同一時間（凌晨 3 點）：日誌保留 1 年；訂單滿 3 年後匿名化
+// 7. 同一時間（凌晨 3 點）：日誌保留 1 年；訂單自交易完成起滿 3 年後匿名化
 // 每項任務分批處理，整次執行最多約 50 秒，做不完的下一分鐘繼續
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -50,10 +50,20 @@ async function reconcile(now) {
 }
 
 async function retryRefunds(now) {
-  const res = await db.collection('refunds')
-    .where({ status: _.in(['pending', 'unknown']), at: _.lt(now - 60 * 1000) })
+  // 公平輪轉（澄清 H2）：先處理還沒試過的，再按「下次重試時間」最早的輪流；未到時間的不查出來，
+  // 否則一直失敗的前 20 筆會永遠擋住後面的退款
+  const base = { status: _.in(['pending', 'unknown']), at: _.lt(now - 60 * 1000) }
+  const fresh = await db.collection('refunds')
+    .where(_.and([base, { nextRetryAt: _.exists(false) }]))
     .orderBy('at', 'asc').limit(20).get()
-  for (const r of res.data) {
+  const list = fresh.data
+  if (list.length < 20) {
+    const due = await db.collection('refunds')
+      .where(_.and([base, { nextRetryAt: _.lte(now) }]))
+      .orderBy('nextRetryAt', 'asc').limit(20 - list.length).get()
+    list.push(...due.data)
+  }
+  for (const r of list) {
     if (!timeLeft()) break
     try {
       await ord.processRefund(cloud, db, r._id)
@@ -98,10 +108,23 @@ async function finishCourts(now) {
 
 async function expireProducts(now) {
   const today = u.dateStr(now)
-  const res = await db.collection('order_items')
-    .where({ kind: 'product', fixedDate: true, codeActive: true, activityDate: _.lt(today) })
+  // 退款中、失敗後 1 小時冷卻中的券在查詢時就排除；先處理沒失敗過的，再按「失敗最早」的輪流，
+  // 一直失敗的前 50 張不會永遠佔住名額（澄清 H3）
+  const base = [
+    { kind: 'product', fixedDate: true, codeActive: true, activityDate: _.lt(today) },
+    _.or([{ refunding: _.exists(false) }, { refunding: '' }])
+  ]
+  const fresh = await db.collection('order_items')
+    .where(_.and([...base, { expireRefundFailAt: _.exists(false) }]))
     .limit(50).get()
-  for (const it of res.data) {
+  const list = fresh.data
+  if (list.length < 50) {
+    const retry = await db.collection('order_items')
+      .where(_.and([...base, { expireRefundFailAt: _.lt(now - 60 * 60 * 1000) }]))
+      .orderBy('expireRefundFailAt', 'asc').limit(50 - list.length).get()
+    list.push(...retry.data)
+  }
+  for (const it of list) {
     if (!timeLeft()) break
     if (it.refunding) continue // 有退款在處理，下一輪再看
     if (it.expireRefundFailAt && now - it.expireRefundFailAt < 60 * 60 * 1000) continue // 剛失敗過，1 小時後再試，避免每分鐘重複通知
@@ -156,7 +179,22 @@ async function purgePhones(now) {
 
 // 資料到期處理（隱私政策「信息存在哪裡，保存多久」）：
 // - 管理操作日誌、通知記錄：保留 1 年（網絡安全法要求至少 6 個月），之後刪除
-// - 訂單：交易記錄保存 3 年（電子商務法），之後匿名化——清掉手機號、微信身份和客人編號，只保留金額和明細供報表使用
+// - 訂單：交易記錄自交易完成起保存 3 年（電子商務法），之後匿名化——清掉手機號、微信身份和客人編號，只保留金額和明細供報表使用
+const RETAIN_MS = 3 * 365 * u.DAY
+
+// 交易完成時間 = 付款、場地打完、活動日過去、券核銷、退款受理中最晚的時間（澄清 H8）
+async function completedAt(o) {
+  let last = Math.max(o.createdAt || 0, o.payTime || 0)
+  const items = await cal.getAll(db.collection('order_items'), { orderId: o._id })
+  for (const it of items) {
+    if (it.kind === 'court' && it.startAt) last = Math.max(last, it.startAt + u.HOUR)
+    if (it.kind === 'product' && it.fixedDate && it.activityDate) last = Math.max(last, u.dayStart(it.activityDate) + u.DAY)
+  }
+  for (const v of await cal.getAll(db.collection('verify_logs'), { orderId: o._id })) last = Math.max(last, v.undoneAt || 0, v.at || 0)
+  for (const r of await cal.getAll(db.collection('refunds'), { orderId: o._id })) last = Math.max(last, r.doneAt || 0, r.at || 0)
+  return last
+}
+
 async function purgeOld(now) {
   const logCut = now - 365 * u.DAY
   for (const name of ['audit_logs', 'notices']) {
@@ -165,13 +203,24 @@ async function purgeOld(now) {
       if (!r.stats || !r.stats.removed) break
     }
   }
-  const orderCut = now - 3 * 365 * u.DAY
+  const orderCut = now - RETAIN_MS
   while (timeLeft()) {
+    // 下單滿 3 年只是「可能到期」；還要從交易完成那天起算滿 3 年才匿名化（澄清 H8）。
+    // 未滿的記下 retainUntil，到時才再查出來
     const res = await db.collection('orders')
-      .where(_.and([{ createdAt: _.lt(orderCut) }, { anonymizedAt: _.exists(false) }, { status: _.neq('pending') }, { status: _.neq('active') }]))
+      .where(_.and([
+        { createdAt: _.lt(orderCut) }, { anonymizedAt: _.exists(false) }, { status: _.neq('pending') }, { status: _.neq('active') },
+        _.or([{ retainUntil: _.exists(false) }, { retainUntil: _.lte(now) }])
+      ]))
       .limit(100).get()
     if (!res.data.length) break
-    const ids = res.data.map(o => o._id)
+    const ids = []
+    for (const o of res.data) {
+      const until = (await completedAt(o)) + RETAIN_MS
+      if (until <= now) ids.push(o._id)
+      else await db.collection('orders').doc(o._id).update({ data: { retainUntil: until } })
+    }
+    if (!ids.length) continue
     await db.collection('order_items').where({ orderId: _.in(ids) }).update({ data: { userId: '' } })
     await db.collection('verify_logs').where({ orderId: _.in(ids) }).update({ data: { phone: '', userId: '' } })
     await db.collection('orders').where({ _id: _.in(ids) }).update({ data: { phone: '', openid: '', userId: '', anonymizedAt: now } })

@@ -8,6 +8,7 @@
 // 3. 釋放場地只釋放「仍屬於本訂單」的車位牌，絕不刪掉別人的。
 // 4. 退款先在事務裡「預留」（固定退款單號、卡片標記退款中、退款次數 +1），再向微信申請；
 //    結果不明時保留預留，由定時任務用同一個退款單號重試，微信保證同一單號只退一次。
+// 5. 退款單號用只增不減的 refundSeq 產生；refundCount 只用來控制 50 次上限，失敗可還回（澄清 H1）。
 const https = require('https')
 const u = require('./util')
 const pay = require('./pay')
@@ -345,15 +346,37 @@ async function cancelPending(cloud, db, order) {
 // ---------- 退款 ----------
 
 // 1. 預留（事務）：parts = [{ itemId, qty, amount }]；qty 為商品退的張數（場地填 1），amount 為退款金額（分）
+// 舊訂單沒有退款流水號 refundSeq 時，從已有退款記錄的最大編號接著編（澄清 H1）
+async function legacyRefundSeq(db, orderId) {
+  const order = await dget(db, 'orders', orderId)
+  if (!order || order.refundSeq !== undefined) return 0
+  const res = await db.collection('refunds').where({ orderId }).limit(1000).get()
+  let max = 0
+  for (const r of res.data) {
+    const m = String(r._id).slice(orderId.length).match(/^R(\d+)$/)
+    if (m) max = Math.max(max, +m[1])
+  }
+  return max
+}
+
 async function reserveRefund(db, { orderId, parts, operatorId, by, reason, asExpired }) {
   await ensureItemIds(db, orderId)
+  const legacySeq = await legacyRefundSeq(db, orderId)
   return tx(db, async t => {
     const order = await tget(t, 'orders', orderId)
     if (!order) return rollbackWith(t, 'NOT_FOUND', '订单不存在')
     if (!['active', 'completed'].includes(order.status)) return rollbackWith(t, 'BAD_STATUS', '该订单当前不能退款')
     const count = order.refundCount || 0
     if (count >= MAX_REFUNDS) return rollbackWith(t, 'TOO_MANY', '此订单已达微信退款次数上限，请联系球馆')
-    const outRefundNo = `${order._id}R${u.pad(count + 1)}`
+    // 退款單號用只增不減的流水號（不能用 refundCount：它在失敗時會還回去，會讓別人的單號被重用）
+    let seq = Math.max(order.refundSeq || 0, legacySeq, order.refundSeq === undefined ? count : 0) + 1
+    let outRefundNo = `${order._id}R${u.pad(seq)}`
+    // 保險：單號已有記錄就往後找，絕不覆蓋已有的退款記錄
+    for (let n = 0; await tget(t, 'refunds', outRefundNo); n++) {
+      if (n >= 20) return rollbackWith(t, 'BUSY', '退款繁忙，请稍后再试')
+      seq += 1
+      outRefundNo = `${order._id}R${u.pad(seq)}`
+    }
 
     const seen = new Set()
     const writes = []
@@ -385,7 +408,7 @@ async function reserveRefund(db, { orderId, parts, operatorId, by, reason, asExp
     }
     await t.collection('refunds').doc(outRefundNo).set({ data: refund })
     for (const w of writes) await t.collection('order_items').doc(w.id).update({ data: w.data })
-    await t.collection('orders').doc(order._id).update({ data: { refundCount: count + 1 } })
+    await t.collection('orders').doc(order._id).update({ data: { refundCount: count + 1, refundSeq: seq } })
     return { outRefundNo, amount: total, order }
   })
 }
@@ -481,8 +504,14 @@ async function markUnknown(db, outRefundNo, e) {
   return tx(db, async t => {
     const cur = await tget(t, 'refunds', outRefundNo)
     if (!cur || cur.status === 'success' || cur.status === 'failed') return cur
+    const now = Date.now()
+    const attempts = (cur.attempts || 0) + 1
     await t.collection('refunds').doc(outRefundNo).update({
-      data: { status: 'unknown', attempts: (cur.attempts || 0) + 1, lastError: String((e && e.message) || e).slice(0, 200), lastTryAt: Date.now() }
+      data: {
+        status: 'unknown', attempts, lastError: String((e && e.message) || e).slice(0, 200), lastTryAt: now,
+        // 下次重試時間：1、2、4、8 分鐘遞增，最長 10 分鐘；未到時間的不佔定時任務每輪名額（澄清 H2）
+        nextRetryAt: now + Math.min(10, 2 ** (attempts - 1)) * 60 * 1000
+      }
     })
     return { ...cur, status: 'unknown' }
   })

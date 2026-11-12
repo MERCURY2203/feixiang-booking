@@ -12,7 +12,11 @@ Page({
   },
 
   onShow() {
-    api
+    this.loadProduct()
+  },
+
+  loadProduct() {
+    return api
       .call('booking', 'product', { id: this.id })
       .then(p => {
         const qty = Math.min(this.data.qty, Math.max(1, p.stock))
@@ -48,8 +52,10 @@ Page({
     wx.showToast({ title: '已加入购物车', icon: 'none' })
   },
 
-  buyNow() {
+  async buyNow() {
     if (this.data.p.stock <= 0) return
-    checkout.start(this, [{ type: 'product', productId: this.data.p._id, qty: this.data.qty }], { expectTotal: this.data.p.price * this.data.qty })
+    const r = await checkout.start(this, [{ type: 'product', productId: this.data.p._id, qty: this.data.qty }], { expectTotal: this.data.p.price * this.data.qty })
+    // 價格已變動或商品失效：重新讀取商品，顯示新價格和庫存，客人看過後再按一次（澄清 H4）
+    if (r && r.invalid) await this.loadProduct()
   }
 })

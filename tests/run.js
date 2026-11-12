@@ -630,6 +630,273 @@ test('C5 資料到期：滿 3 年的訂單匿名化、1 年前的日誌刪除，
   assert(doc('audit_logs', 'new'))
 })
 
+// ---------------- Codex 複查報告（2026-11-11，B1–B7）回歸測試 ----------------
+
+const fs = require('fs')
+const vm = require('vm')
+const cloudPay = require('wx-server-sdk').cloudPay
+const ROOT = path.join(__dirname, '..')
+
+// 在沙盒裡執行小程序頁面代碼，取出 Page({...}) 的物件；setData 只做最簡單的路徑賦值
+function loadPage(file, mods, extra = {}) {
+  let page
+  const req = name => {
+    for (const [k, v] of Object.entries(mods)) if (name.endsWith(k)) return v
+    return {}
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), { Page: o => (page = o), require: req, console, ...extra })
+  page.data = JSON.parse(JSON.stringify(page.data))
+  page.setData = (patch, cb) => {
+    for (const [k, v] of Object.entries(patch)) {
+      const parts = k.replace(/\[(\d+)\]/g, '.$1').split('.')
+      let o = page.data
+      for (const x of parts.slice(0, -1)) o = o[x]
+      o[parts[parts.length - 1]] = v
+    }
+    if (cb) cb()
+  }
+  return page
+}
+
+test('B1 較早的退款失敗後，不會重用別人的退款單號；帳上已退金額 = 微信實退', async () => {
+  store.write('products', 'p3', { ...doc('products', 'p1'), name: '体验券' })
+  store.write('products', 'p4', { ...doc('products', 'p1'), name: '月卡' })
+  const id = await buy('oA', [product('p1'), product('p3'), product('p4')])
+  const [P, Q, S] = ['p1', 'p3', 'p4'].map(pid => itemsOf(id).find(i => i.productId === pid))
+  const real = cloudPay.refund
+  let entered, release
+  const enteredP = new Promise(r => (entered = r))
+  const releaseP = new Promise(r => (release = r))
+  try {
+    cloudPay.refund = async p => {
+      if (p.outRefundNo === `${id}R01`) {
+        entered()
+        await releaseP
+        return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'NOTENOUGH', errCodeDes: '商户余额不足' }
+      }
+      return real(p)
+    }
+    const refund = it => call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 })
+    const first = refund(P)
+    await enteredP
+    must(await refund(Q)) // R02
+    release()
+    assert.strictEqual((await first).ok, false)
+    must(await refund(S)) // 必須是全新的 R03，不能重用 R02
+  } finally {
+    cloudPay.refund = real
+  }
+  assert.strictEqual(doc('refunds', `${id}R01`).status, 'failed')
+  assert.strictEqual(doc('refunds', `${id}R02`).parts[0].itemId, Q._id)
+  assert.strictEqual(doc('refunds', `${id}R03`).parts[0].itemId, S._id)
+  assert.strictEqual(doc('orders', id).refundedFee, 10000)
+  assert.strictEqual(wechat.refundedTotal(id), 10000)
+  assert.strictEqual(doc('orders', id).refundCount, 2) // 失敗的那次不算次數
+  assert.strictEqual(doc('order_items', P._id).refundedQty || 0, 0) // 沒退成功的券不能結案
+})
+
+test('B1b 舊訂單沒有退款流水號：從已有退款記錄的最大編號接著編，不覆蓋', async () => {
+  store.write('products', 'p3', { ...doc('products', 'p1'), name: '体验券' })
+  const id = await buy('oA', [product('p1', 2), product('p3')])
+  const it = itemsOf(id).find(i => i.productId === 'p1')
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  // 模擬舊版程式留下的資料：沒有 refundSeq，refundCount 被錯誤地減回 1
+  const o = doc('orders', id)
+  delete o.refundSeq
+  store.write('orders', id, { ...o, refundCount: 1 })
+  const q = itemsOf(id).find(i => i.productId === 'p3')
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: q._id, qty: 1 }))
+  assert.strictEqual(doc('refunds', `${id}R03`).parts[0].itemId, q._id)
+  assert.strictEqual(doc('refunds', `${id}R02`).parts[0].itemId, it._id)
+})
+
+test('B2 前 20 筆退款一直結果不明，第 21 筆仍會被補做', async () => {
+  for (let i = 0; i < 21; i++) {
+    const oid = `O${i}`, rid = `${oid}R01`, iid = `I${i}`
+    store.write('orders', oid, { userId: 'uA', status: 'active', itemIds: [iid], totalFee: 100, refundCount: 1, refundSeq: 1, createdAt: BASE })
+    store.write('order_items', iid, { orderId: oid, kind: 'product', productId: 'p1', price: 100, qty: 1, refunding: rid, refundingFee: 100, refundingQty: 1, codeActive: true })
+    store.write('refunds', rid, { orderId: oid, kind: 'items', amount: 100, parts: [{ itemId: iid, qty: 1, amount: 100 }], status: i < 20 ? 'unknown' : 'pending', at: BASE - 10 * MIN + i })
+    wechat.orders[oid] = { totalFee: 100, state: 'SUCCESS' }
+  }
+  const real = cloudPay.refund
+  try {
+    cloudPay.refund = async p => {
+      if (p.outTradeNo !== 'O20') throw new Error('persistent network error')
+      return real(p)
+    }
+    for (let i = 0; i < 4; i++) {
+      await runTimer()
+      clock.now += MIN
+    }
+  } finally {
+    cloudPay.refund = real
+  }
+  assert.strictEqual(doc('refunds', 'O20R01').status, 'success')
+  assert.strictEqual(wechat.refundedTotal('O20'), 100)
+  assert.strictEqual(doc('refunds', 'O0R01').status, 'unknown') // 舊的仍保留預留，沒有被隨便宣告失敗
+  assert(doc('refunds', 'O0R01').nextRetryAt > 0)
+})
+
+test('B3 前 50 張過期券退款一直被拒，第 51 張仍會自動退款', async () => {
+  for (let i = 0; i < 51; i++) {
+    const oid = `O${i}`, iid = `I${i}`
+    store.write('orders', oid, { userId: 'uA', status: 'active', itemIds: [iid], totalFee: 100, refundCount: 0, createdAt: BASE })
+    store.write('order_items', iid, { orderId: oid, userId: 'uA', kind: 'product', productId: 'p1', price: 100, qty: 1, status: 'active', codeActive: true, fixedDate: true, activityDate: '2026-11-09' })
+    wechat.orders[oid] = { totalFee: 100, state: 'SUCCESS' }
+  }
+  const real = cloudPay.refund
+  try {
+    cloudPay.refund = async p => {
+      if (p.outTradeNo !== 'O50') return { returnCode: 'SUCCESS', resultCode: 'FAIL', errCode: 'TRADE_OVERDUE' }
+      return real(p)
+    }
+    for (let i = 0; i < 4; i++) {
+      await runTimer()
+      clock.now += 61 * MIN
+    }
+  } finally {
+    cloudPay.refund = real
+  }
+  assert.strictEqual(doc('order_items', 'I50').expiredQty, 1)
+  assert.strictEqual(doc('order_items', 'I50').codeActive, false)
+  assert.strictEqual(wechat.refundedTotal('O50'), 100)
+})
+
+test('B4 商品頁「立即购买」遇到改價：頁面更新成新價，再按一次按新價下單', async () => {
+  const attempts = []
+  const api = {
+    toast() {},
+    async call(service, action, params) {
+      const r = await call(booking, 'oA', { action, ...params })
+      if (action === 'checkout') attempts.push({ expect: params.expectTotal, code: r.code || 'OK' })
+      if (!r.ok) throw Object.assign(new Error(r.message), r)
+      return r.data
+    }
+  }
+  const wx = { showModal: o => o.success({ confirm: true }), showLoading() {}, hideLoading() {}, setStorageSync() {}, redirectTo() {}, navigateTo() {}, requestPayment: o => o.fail && o.fail({ errMsg: 'cancel' }) }
+  const app = { userReady: Promise.resolve(), globalData: { user: { phone: '13800001111' } } }
+  const ctxC = { module: { exports: {} }, console, wx, getApp: () => app, require: n => (n === './api' ? api : n === './cart' ? {} : { TPL_TIMEOUT_REFUND: '' }) }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/checkout.js'), 'utf8'), ctxC)
+  const page = loadPage('miniprogram/pages/product/index.js', { '/api': api, '/checkout': ctxC.module.exports, '/money': { formatFen: String }, '/cart': {} }, { wx, setTimeout })
+  page.id = 'p1'
+  await page.loadProduct()
+  assert.strictEqual(page.data.p.price, 5000)
+  store.write('products', 'p1', { ...doc('products', 'p1'), price: 9000 })
+  await page.buyNow()
+  assert.strictEqual(page.data.p.price, 9000) // 被擋下後頁面已顯示新價
+  await page.buyNow()
+  assert.deepStrictEqual(attempts.map(a => a.code), ['PRICE_CHANGED', 'OK'])
+  assert.strictEqual(attempts[1].expect, 9000)
+  const pending = all('orders').find(o => o.status === 'pending')
+  assert(pending && pending.totalFee === 9000)
+})
+
+test('B5 訂場頁：點新日期後才發出的自動刷新，也查客人點的新日期', async () => {
+  const pending = []
+  const api = { call: (_s, _a, input) => new Promise(resolve => pending.push({ date: input.date, resolve })), toast() {} }
+  const page = loadPage('miniprogram/pages/booking/index.js', { '/api': api, '/cart': { hasCourt: () => false }, '/money': { formatFen: String }, '/time': { syncServerTime() {} } })
+  page.measure = () => {}
+  page.data.date = '2026-11-11'
+  const res = date => ({ date, days: [{ date }], serverNow: BASE, hours: [], courts: [], cells: [], banners: [] })
+  // 順序一：先點日期，切換還沒回來時自動刷新
+  const picked = page.load(false, '2026-11-12')
+  const auto = page.load(false)
+  assert.strictEqual(pending[1].date, '2026-11-12')
+  pending[0].resolve(res(pending[0].date))
+  pending[1].resolve(res(pending[1].date))
+  await picked
+  await auto
+  assert.strictEqual(page.data.date, '2026-11-12')
+  // 順序二：自動刷新先發，再點日期，回應倒序到達
+  const auto2 = page.load(false)
+  const picked2 = page.load(false, '2026-11-13')
+  pending[3].resolve(res(pending[3].date))
+  pending[2].resolve(res(pending[2].date))
+  await picked2
+  await auto2
+  assert.strictEqual(page.data.date, '2026-11-13')
+})
+
+test('B6 待支付頁離開後：舊查單不再重試、不再跳轉；回來後可正常查單', async () => {
+  const timers = new Map()
+  const redirects = []
+  let n = 0
+  let calls = 0
+  const api = { call: async () => { calls++; return { _id: 'O', status: calls === 1 ? 'pending' : 'active' } }, toast() {} }
+  const page = loadPage('miniprogram/pages/order/pay/index.js',
+    { '/api': api, '/checkout': {}, '/money': { formatFen: String }, '/time': { now: () => BASE, syncServerTime() {} } },
+    { setTimeout: fn => (timers.set(++n, fn), n), clearTimeout: id => timers.delete(id), setInterval: () => 0, clearInterval() {}, wx: { redirectTo: r => redirects.push(r.url) } })
+  page.orderId = 'O'
+  page.load = () => {}
+  page.onShow()
+  page.check()
+  await F.tick()
+  assert.strictEqual(timers.size, 1) // 安排了 3 秒後重試
+  page.onUnload()
+  assert.strictEqual(timers.size, 0) // 離開時重試被取消
+  assert.strictEqual(calls, 1)
+  assert.strictEqual(redirects.length, 0)
+  // 回到頁面重新查單，能正常跳轉
+  page.onShow()
+  page.check()
+  await F.tick()
+  assert.strictEqual(redirects.length, 1)
+})
+
+test('B6b 待支付頁：查單已發出、還沒回來時離開，回來的結果不跳轉', async () => {
+  let resolveCall
+  const redirects = []
+  const api = { call: () => new Promise(r => (resolveCall = r)), toast() {} }
+  const page = loadPage('miniprogram/pages/order/pay/index.js',
+    { '/api': api, '/checkout': {}, '/money': { formatFen: String }, '/time': { now: () => BASE, syncServerTime() {} } },
+    { setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, wx: { redirectTo: r => redirects.push(r.url) } })
+  page.orderId = 'O'
+  page.load = () => {}
+  page.onShow()
+  page.check()
+  page.onHide()
+  resolveCall({ _id: 'O', status: 'active' })
+  await F.tick()
+  await F.tick()
+  assert.strictEqual(redirects.length, 0)
+})
+
+test('B7 跨日才補做成功的退款，報表記在受理那天', async () => {
+  clock.now = Date.UTC(2026, 10, 10, 15, 59) // 北京時間 11/10 23:59
+  const id = await buy('oA', [product('p1')])
+  const it = itemsOf(id)[0]
+  const real = cloudPay.refund
+  try {
+    cloudPay.refund = async () => { throw new Error('offline before send') }
+    must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  } finally {
+    cloudPay.refund = real
+  }
+  clock.now += 3 * MIN // 11/11 00:02 定時補做，微信才受理
+  await runTimer()
+  assert.strictEqual(doc('refunds', `${id}R01`).status, 'success')
+  const d10 = must(await call(admin, 'oO', { action: 'report', mode: 'day', from: '2026-11-10', to: '2026-11-10' }))
+  const d11 = must(await call(admin, 'oO', { action: 'report', mode: 'day', from: '2026-11-11', to: '2026-11-11' }))
+  assert.strictEqual(d10.total.refund, 0)
+  assert.strictEqual(d11.total.refund, 5000)
+})
+
+test('H8 下單滿 3 年但券最近才核銷：交易完成未滿 3 年，暫不匿名化；到期後才匿名化', async () => {
+  const id = await buy('oA', [product('p1')])
+  store.write('orders', id, { ...doc('orders', id), status: 'completed' })
+  store.write('verify_logs', 'v1', { type: 'verify', orderId: id, userId: 'uA', phone: '13800001111', at: Date.UTC(2028, 0, 1), day: '2028-01-01' })
+  clock.now = Date.UTC(2029, 10, 12, 19, 0, 0) // 下單約 3 年後的凌晨 3 點
+  await runTimer()
+  let o = doc('orders', id)
+  assert(!o.anonymizedAt && o.openid) // 手機號另由「一年未訂場刪除手機號」規則處理，這裡看匿名化本身
+  assert.strictEqual(o.retainUntil, Date.UTC(2028, 0, 1) + 3 * 365 * 24 * 3600e3)
+  clock.now = Date.UTC(2031, 0, 2, 19, 0, 0) // 核銷 3 年後的凌晨 3 點
+  await runTimer()
+  o = doc('orders', id)
+  assert(o.anonymizedAt && o.openid === '' && o.userId === '')
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {
