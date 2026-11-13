@@ -33,15 +33,26 @@ Page({
     if (this.data.more) this.load(false)
   },
 
+  // 只採用最後一次篩選的結果；翻頁載入中不重複追加（澄清 K8）
   load(reset) {
+    if (reset) {
+      this.gen = (this.gen || 0) + 1
+      this.loadingMore = false
+    } else if (this.loadingMore) return
+    const gen = this.gen
     const skip = reset ? 0 : this.data.list.length
+    if (!reset) this.loadingMore = true
     api
       .call('admin', 'orders', { keyword: this.data.keyword, date: this.data.date, tab: this.data.tab, skip })
       .then(r => {
+        if (gen !== this.gen) return
         const rows = r.list.map(o => ({ ...o, cards: split(o, rawLines(o), flatLines), totalText: formatFen(o.totalFee) }))
         this.setData({ list: reset ? rows : this.data.list.concat(rows), more: r.more, loaded: true })
       })
-      .catch(err => api.toast(err.message))
+      .catch(err => gen === this.gen && api.toast(err.message))
+      .then(() => {
+        if (!reset && gen === this.gen) this.loadingMore = false
+      })
   },
 
   onKeyword(e) {

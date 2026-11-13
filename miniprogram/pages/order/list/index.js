@@ -41,15 +41,22 @@ Page({
   switchTab(e) {
     const tab = e.currentTarget.dataset.key
     if (tab === this.data.tab) return
+    this.loadingMore = false
     this.setData({ tab, list: [], loaded: false })
     this.load(true)
   },
 
+  // 只採用最後一次切換分頁後的結果；翻頁載入中不重複追加（澄清 K8）
   load(reset) {
+    if (reset) this.gen = (this.gen || 0) + 1
+    else if (this.loadingMore) return
+    const gen = this.gen
     const skip = reset ? 0 : this.data.list.length
+    if (!reset) this.loadingMore = true
     return api
       .call('booking', 'myOrders', { tab: this.data.tab, skip })
       .then(res => {
+        if (gen !== this.gen) return
         syncServerTime(res.serverNow)
         const rows = res.list.map(o => ({
           ...o,
@@ -61,7 +68,10 @@ Page({
         this.setData({ list: reset ? rows : this.data.list.concat(rows), more: res.more, loaded: true })
         this.tick()
       })
-      .catch(err => api.toast(err.message))
+      .catch(err => gen === this.gen && api.toast(err.message))
+      .then(() => {
+        if (!reset && gen === this.gen) this.loadingMore = false
+      })
   },
 
   tick() {

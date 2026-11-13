@@ -33,6 +33,31 @@ function statusText(o, refunding) {
   return base
 }
 
+// 版本鎖（澄清 K6、K10）：先記下 locks/{name} 的版本，check() 用一般查詢做檢查（不通過就返回失敗），
+// 再在事務裡確認版本沒變，write(t) 寫入並把版本加一。兩個同時保存時，後提交的一方會發現版本變了，
+// 重新檢查（就能看到前一方剛存的內容）
+async function withVersionLock(name, check, write) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lock = await ord.dget(db, 'locks', name)
+    const ver = (lock && lock.ver) || 0
+    const bad = await check()
+    if (bad) return bad
+    try {
+      await ord.tx(db, async t => {
+        const cur = await ord.tget(t, 'locks', name)
+        if (((cur && cur.ver) || 0) !== ver) return ord.rollbackWith(t, 'RETRY', '数据已变动')
+        await write(t)
+        await t.collection('locks').doc(name).set({ data: { ver: ver + 1, at: Date.now() } })
+      })
+      return null
+    } catch (e) {
+      if (e.business && e.code === 'RETRY') continue
+      throw e
+    }
+  }
+  return u.fail('操作太频繁，请稍后再试')
+}
+
 function hm(ts) {
   const d = new Date(ts + 8 * u.HOUR)
   return `${u.pad(d.getUTCHours())}:${u.pad(d.getUTCMinutes())}`
@@ -401,11 +426,20 @@ async function productSave(user, p) {
   return u.ok({ _id: res._id })
 }
 
+// 刪除在事務裡重新確認「從未售出」（澄清 K5）：下單事務會改寫同一個商品（扣庫存、加已售），
+// 兩者互斥，不會刪掉剛賣出的商品。買過的商品只能下架，下架不影響已購券的核銷和退款
 async function productDelete(user, id) {
-  const p = (await db.collection('products').doc(id).get().catch(() => ({ data: null }))).data
-  if (!p) return u.fail('商品不存在')
-  if ((p.soldCount || 0) > 0) return u.fail('已有人购买过的商品不能删除，只能下架')
-  await db.collection('products').doc(id).remove()
+  try {
+    await ord.tx(db, async t => {
+      const p = await ord.tget(t, 'products', String(id || ''))
+      if (!p) return ord.rollbackWith(t, 'BAD', '商品不存在')
+      if ((p.soldCount || 0) > 0) return ord.rollbackWith(t, 'BAD', '已有人购买过的商品不能删除，只能下架')
+      await t.collection('products').doc(p._id).remove()
+    })
+  } catch (e) {
+    if (e.business) return u.fail(e.message)
+    throw e
+  }
   await audit(user, 'product_delete', { id })
   return u.ok(true)
 }
@@ -420,6 +454,27 @@ async function productToggle(user, id, onShelf) {
 
 function bannerShowing(b, now) {
   return b.enabled && (b.mode !== 'timed' || b.endAt > now)
+}
+
+// 橫幅的顯示區間：長期橫幅從現在起一直顯示；限時橫幅按開始、結束時間
+function bannerSpan(b, now) {
+  return b.mode === 'timed' ? [Math.max(b.startAt, now), b.endAt] : [now, Infinity]
+}
+
+// 加入 b 之後，任何一個時刻同時顯示的橫幅是否會超過 5 張（澄清 K10）
+async function bannerOverLimit(b, now) {
+  if (!bannerShowing(b, now)) return null
+  const [s, e] = bannerSpan(b, now)
+  const others = (await db.collection('banners').where({ enabled: true }).limit(100).get()).data
+    .filter(x => x._id !== b._id && bannerShowing(x, now))
+    .map(x => bannerSpan(x, now))
+    .filter(([xs, xe]) => xs < e && s < xe)
+  // 最多同時顯示的時刻一定出現在某張橫幅開始的那一刻
+  const points = [s, ...others.map(([xs]) => xs).filter(x => x >= s && x < e)]
+  for (const p of points) {
+    if (others.filter(([xs, xe]) => xs <= p && p < xe).length >= 5) return u.fail('该时段已有 5 张横幅同时显示，请先下架一张或调整时间')
+  }
+  return null
 }
 
 async function bannerList() {
@@ -460,27 +515,28 @@ async function bannerSave(user, b) {
     data.startAt = 0
     data.endAt = 0
   }
-  if (bannerShowing(data, Date.now())) {
-    const all = (await db.collection('banners').where({ enabled: true }).get()).data.filter(x => x._id !== b._id && bannerShowing(x, Date.now()))
-    if (all.length >= 5) return u.fail('已有 5 张横幅在显示，请先下架一张')
-  }
-  if (b._id) await db.collection('banners').doc(b._id).update({ data })
-  else {
+  let full = null
+  if (!b._id) {
     const last = await db.collection('banners').orderBy('sort', 'desc').limit(1).get()
-    await db.collection('banners').add({ data: { ...data, sort: last.data.length ? last.data[0].sort + 1 : 0, createdAt: Date.now() } })
+    full = { ...data, sort: last.data.length ? last.data[0].sort + 1 : 0, createdAt: Date.now() }
   }
+  const id = b._id || u.newId('BN')
+  const bad = await withVersionLock('banners', () => bannerOverLimit({ ...data, _id: b._id }, Date.now()),
+    t => (b._id ? t.collection('banners').doc(id).update({ data }) : t.collection('banners').doc(id).set({ data: full })))
+  if (bad) return bad
   await audit(user, 'banner_save', { id: b._id || 'new' })
   return u.ok(true)
 }
 
 async function bannerToggle(user, id, enabled) {
   const b = (await db.collection('banners').doc(id).get()).data
-  if (enabled && bannerShowing({ ...b, enabled: true }, Date.now())) {
-    const all = (await db.collection('banners').where({ enabled: true }).get()).data.filter(x => x._id !== id && bannerShowing(x, Date.now()))
-    if (all.length >= 5) return u.fail('已有 5 张横幅在显示，请先下架一张')
+  if (!enabled) {
+    await db.collection('banners').doc(id).update({ data: { enabled: false } })
+    return u.ok(true)
   }
-  await db.collection('banners').doc(id).update({ data: { enabled: !!enabled } })
-  return u.ok(true)
+  const bad = await withVersionLock('banners', () => bannerOverLimit({ ...b, enabled: true }, Date.now()),
+    t => t.collection('banners').doc(id).update({ data: { enabled: true } }))
+  return bad || u.ok(true)
 }
 
 async function bannerReorder(ids) {
@@ -518,9 +574,15 @@ async function saveRegular(user, { weekday, weekend, effectiveFrom }) {
   if (!(weekday > 0 && weekend > 0)) return u.fail('请填写正确的价格')
   const today = u.dateStr(Date.now())
   const from = effectiveFrom && effectiveFrom > today ? effectiveFrom : today
-  const same = await db.collection('prices').where({ type: 'regular', effectiveFrom: from }).get()
-  if (same.data.length) await db.collection('prices').doc(same.data[0]._id).update({ data: { weekday, weekend, updatedAt: Date.now() } })
-  else await db.collection('prices').add({ data: { type: 'regular', weekday, weekend, effectiveFrom: from, createdAt: Date.now() } })
+  let id
+  const bad = await withVersionLock('prices', async () => {
+    const same = await db.collection('prices').where({ type: 'regular', effectiveFrom: from }).get()
+    id = same.data.length ? same.data[0]._id : ''
+    return null
+  }, t => (id
+    ? t.collection('prices').doc(id).update({ data: { weekday, weekend, updatedAt: Date.now() } })
+    : t.collection('prices').doc(u.newId('PR')).set({ data: { type: 'regular', weekday, weekend, effectiveFrom: from, createdAt: Date.now() } })))
+  if (bad) return bad
   await audit(user, 'price_regular', { weekday, weekend, from })
   return u.ok(true)
 }
@@ -543,19 +605,24 @@ async function saveDaily(user, r) {
     const h = cal.hoursFor(cfg, d)
     if (!h || startHour < h.open || endHour > h.close) return u.fail(`部分时段不在营业时间内（${u.cnDate(d)}）`)
   }
-  // 單日價格之間不能重疊
-  const others = (await cal.getAll(db.collection('prices'), { type: 'daily', lastDate: _.gte(dates[0]) })).filter(x => x._id !== r._id)
-  for (const o of others) {
-    const shareDate = o.dates.some(d => dates.includes(d))
-    const shareCourt = o.courts.some(c => courts.includes(c))
-    const shareHour = o.startHour < endHour && startHour < o.endHour
-    if (shareDate && shareCourt && shareHour) {
-      return u.fail(`与已有单日价格冲突：${u.cnDate(o.dates[0])} ${u.pad(o.startHour)}:00–${u.pad(o.endHour)}:00`, 'CONFLICT', { conflictId: o._id })
+  // 單日價格之間不能重疊；檢查和保存用「價格鎖」保護，同時保存兩筆重疊的只會有一筆成功（澄清 K6）
+  const check = async () => {
+    const others = (await cal.getAll(db.collection('prices'), { type: 'daily', lastDate: _.gte(dates[0]) })).filter(x => x._id !== r._id)
+    for (const o of others) {
+      const shareDate = o.dates.some(d => dates.includes(d))
+      const shareCourt = o.courts.some(c => courts.includes(c))
+      const shareHour = o.startHour < endHour && startHour < o.endHour
+      if (shareDate && shareCourt && shareHour) {
+        return u.fail(`与已有单日价格冲突：${u.cnDate(o.dates[0])} ${u.pad(o.startHour)}:00–${u.pad(o.endHour)}:00`, 'CONFLICT', { conflictId: o._id })
+      }
     }
+    return null
   }
   const data = { type: 'daily', dates, lastDate: dates[dates.length - 1], startHour, endHour, courts, price, updatedAt: Date.now() }
-  if (r._id) await db.collection('prices').doc(r._id).update({ data })
-  else await db.collection('prices').add({ data: { ...data, createdAt: Date.now() } })
+  const bad = await withVersionLock('prices', check, t => (r._id
+    ? t.collection('prices').doc(r._id).update({ data })
+    : t.collection('prices').doc(u.newId('PR')).set({ data: { ...data, createdAt: Date.now() } })))
+  if (bad) return bad
   await audit(user, 'price_daily', { dates: dates.length, price })
   return u.ok(true)
 }
@@ -597,19 +664,50 @@ async function ordersOutside(dates, open, close) {
     .map(l => `${u.cnDate(l.date)} ${u.hourRange(l.hour)} ${l.court}号场`)
 }
 
+// 改營業時間與下單互斥（澄清 K2）：在事務裡改寫受影響日期的「日期鎖」並把營業時間版本加一，
+// 同時寫入營業時間記錄（write(t) 負責）。下單事務會確認版本沒變並改寫同一把鎖，兩邊只有一邊能成功
+async function writeHours(dates, write) {
+  await ord.tx(db, async t => {
+    const cur = {}
+    for (const d of dates) cur[d] = await ord.tget(t, 'locks', `day_${d}`)
+    for (const d of dates) {
+      const l = cur[d] || {}
+      await t.collection('locks').doc(`day_${d}`).set({ data: { hoursVer: (l.hoursVer || 0) + 1, n: l.n || 0, at: Date.now() } })
+    }
+    await write(t)
+  })
+}
+
+// 營業時間記錄寫回原樣（old 為 null 代表原本沒有這條記錄）
+function restoreHours(t, id, old) {
+  if (old) {
+    const { _id, ...data } = old
+    return t.collection('business_hours').doc(id).set({ data })
+  }
+  return t.collection('business_hours').doc(id).remove()
+}
+
+// 順序：先存新設定 → 再查訂單 → 有訂單落在新的休息時段就還原並提示（澄清 K2）
 async function saveDailyHours(user, { open, close, effectiveFrom }) {
   open = Math.floor(open)
   close = Math.floor(close)
   if (!(open >= 0 && close <= 24 && close > open)) return u.fail('请填写正确的营业时间')
-  const today = u.dateStr(Date.now())
+  const now = Date.now()
+  const today = u.dateStr(now)
   const from = effectiveFrom && effectiveFrom > today ? effectiveFrom : today
-  // 只檢查沒有特殊日期覆蓋的日子
   const cfg = await cal.loadConfig(db)
-  const list = await ordersOutsideRange(from, open, close, cfg)
-  if (list.length) return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
+  const dates = cal.bookableDays(cfg, now).filter(d => d >= from)
   const same = await db.collection('business_hours').where({ type: 'daily', effectiveFrom: from }).get()
-  if (same.data.length) await db.collection('business_hours').doc(same.data[0]._id).update({ data: { open, close } })
-  else await db.collection('business_hours').add({ data: { type: 'daily', open, close, effectiveFrom: from, createdAt: Date.now() } })
+  const old = same.data[0] || null
+  const id = old ? old._id : u.newId('BH')
+  const data = { type: 'daily', open, close, effectiveFrom: from, createdAt: old ? old.createdAt || now : now, updatedAt: now }
+  await writeHours(dates, t => t.collection('business_hours').doc(id).set({ data }))
+  // 只檢查沒有特殊日期覆蓋的日子
+  const list = await ordersOutsideRange(from, open, close, cfg)
+  if (list.length) {
+    await writeHours(dates, t => restoreHours(t, id, old))
+    return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
+  }
   await audit(user, 'hours_daily', { open, close, from })
   return u.ok(true)
 }
@@ -631,12 +729,16 @@ async function saveSpecial(user, { date, closed, open, close }) {
     close = Math.floor(close)
     if (!(open >= 0 && close <= 24 && close > open)) return u.fail('请填写正确的营业时间')
   }
-  const list = await ordersOutside([date], closed ? null : open, close)
-  if (list.length) return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
-  const data = { type: 'special', date, closed, open: closed ? 0 : open, close: closed ? 0 : close, updatedAt: Date.now() }
   const same = await db.collection('business_hours').where({ type: 'special', date }).get()
-  if (same.data.length) await db.collection('business_hours').doc(same.data[0]._id).update({ data })
-  else await db.collection('business_hours').add({ data })
+  const old = same.data[0] || null
+  const id = old ? old._id : `special_${date}`
+  const data = { type: 'special', date, closed, open: closed ? 0 : open, close: closed ? 0 : close, updatedAt: Date.now() }
+  await writeHours([date], t => t.collection('business_hours').doc(id).set({ data }))
+  const list = await ordersOutside([date], closed ? null : open, close)
+  if (list.length) {
+    await writeHours([date], t => restoreHours(t, id, old))
+    return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
+  }
   await audit(user, 'hours_special', { date, closed })
   return u.ok(true)
 }
@@ -646,9 +748,12 @@ async function deleteSpecial(user, id) {
   if (!sp) return u.ok(true)
   const cfg = await cal.loadConfig(db)
   const normal = cal.hoursFor({ ...cfg, special: {} }, sp.date)
-  const list = await ordersOutside([sp.date], normal.open, normal.close)
-  if (list.length) return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
-  await db.collection('business_hours').doc(id).remove()
+  await writeHours([sp.date], t => t.collection('business_hours').doc(id).remove())
+  const list = await ordersOutside([sp.date], normal ? normal.open : null, normal ? normal.close : 0)
+  if (list.length) {
+    await writeHours([sp.date], t => restoreHours(t, id, sp))
+    return u.fail('以下时段已有订单，请先处理', 'HAS_ORDERS', { orders: list.slice(0, 30) })
+  }
   await audit(user, 'hours_special_delete', { date: sp.date })
   return u.ok(true)
 }

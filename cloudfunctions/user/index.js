@@ -19,36 +19,67 @@ function publicUser(u) {
   }
 }
 
+// 事務內讀取單個文檔：不存在返回 null
+async function tget(t, coll, id) {
+  try {
+    const r = await t.collection(coll).doc(id).get()
+    return r.data || null
+  } catch (e) {
+    if (/not exist|not found|cannot find|-502005|DATABASE_DOCUMENT_NOT_EXIST/i.test(String((e && (e.errMsg || e.message)) || e))) return null
+    throw e
+  }
+}
+
+// 帳號編號 = U + OpenID 的雜湊（不直接用 OpenID），同一個人永遠算出同一個編號（澄清 K4）
+function userIdFor(openid) {
+  return `U${require('crypto').createHash('sha256').update(`feixiang:${openid}`).digest('hex').slice(0, 24)}`
+}
+
+// 找到或建立帳號：先找已有帳號（含舊版隨機編號的帳號），沒有才在事務裡用固定編號建立；
+// 同一個人同時點兩次「同意」也只會有一個帳號
 async function getOrCreate(openid) {
   const found = await users.where({ openid }).limit(1).get()
   if (found.data.length) return found.data[0]
+  const _id = userIdFor(openid)
   const doc = { openid, role: 'customer', nickname: '', avatar: '', phone: '', remark: '', createdAt: Date.now() }
-  const res = await users.add({ data: doc })
-  return { _id: res._id, ...doc }
+  return db.runTransaction(async t => {
+    const cur = await tget(t, 'users', _id)
+    if (cur) return { _id, ...cur }
+    await t.collection('users').doc(_id).set({ data: doc })
+    return { _id, ...doc }
+  }, 3)
 }
 
 async function audit(actor, action, detail) {
   await db.collection('audit_logs').add({ data: { actorId: actor._id, action, detail, at: Date.now() } })
 }
 
-// 老闆綁定備用路：開發者在 settings/owner.presetPhone 登記手機號，該號碼的用戶授權後自動成為老闆
+// 老闆綁定備用路：開發者在 settings/owner.presetPhone 登記手機號，該號碼的用戶授權後自動成為老闆。
+// 比對預設號、降級舊老闆、升級新老闆、清空預設號放在同一個事務（澄清 K3）：同時兩人綁定只會有一人成功
 async function applyOwnerPreset(user) {
   if (!user.phone || user.role === 'owner') return user
-  let setting
+  let bound
   try {
-    setting = (await db.collection('settings').doc('owner').get()).data
+    bound = await db.runTransaction(async t => {
+      const setting = await tget(t, 'settings', 'owner')
+      if (!setting || !setting.presetPhone || setting.presetPhone !== user.phone) return false
+      const me = await tget(t, 'users', user._id)
+      if (!me || me.phone !== user.phone) return false
+      // 系統只有一位老闆：舊老闆身份自動移除；登記的手機號用一次即清空
+      if (setting.ownerId && setting.ownerId !== user._id) {
+        const prev = await tget(t, 'users', setting.ownerId)
+        if (prev && prev.role === 'owner') await t.collection('users').doc(setting.ownerId).update({ data: { role: 'customer' } })
+      }
+      await t.collection('users').doc(user._id).update({ data: { role: 'owner' } })
+      await t.collection('settings').doc('owner').update({ data: { ownerId: user._id, presetPhone: '', usedAt: Date.now() } })
+      return true
+    }, 3)
   } catch (e) {
+    console.error('applyOwnerPreset', e)
     return user
   }
-  if (!setting || !setting.presetPhone || setting.presetPhone !== user.phone) return user
-
-  // 系統只有一位老闆：舊老闆身份自動移除；登記的手機號用一次即清空
-  if (setting.ownerId && setting.ownerId !== user._id) {
-    await users.doc(setting.ownerId).update({ data: { role: 'customer' } })
-  }
-  await users.doc(user._id).update({ data: { role: 'owner' } })
-  await db.collection('settings').doc('owner').update({ data: { ownerId: user._id, presetPhone: '', usedAt: Date.now() } })
-  await audit(user, 'owner_bound_by_phone', { phone: user.phone })
+  if (!bound) return user
+  await audit(user, 'owner_bound_by_phone', { phone: user.phone }).catch(e => console.error('audit', e))
   return { ...user, role: 'owner' }
 }
 

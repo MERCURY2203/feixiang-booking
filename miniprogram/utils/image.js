@@ -10,6 +10,7 @@ function chooseMedia(count) {
     wx.chooseMedia({
       count,
       mediaType: ['image'],
+      sourceType: ['album'], // 只從相冊選，不開相機拍攝（澄清 K14）
       sizeType: ['compressed'],
       success: res => resolve(res.tempFiles.map(f => f.tempFilePath)),
       fail: e => {

@@ -87,10 +87,14 @@ function randomDigits(n) {
   return s
 }
 
-function newId(prefix) {
+// 編號 = 前綴 + 北京時間（到秒）+ 隨機數字。隨機部分用加密等級的隨機數（澄清 K1）；
+// 仍可能撞號，所以建立記錄時一律在事務裡確認編號沒被用過
+function newId(prefix, digits = 6) {
   const d = new Date(Date.now() + BJ)
   const stamp = `${String(d.getUTCFullYear()).slice(2)}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`
-  return `${prefix}${stamp}${randomDigits(6)}`
+  let r = ''
+  for (let i = 0; i < digits; i++) r += require('crypto').randomInt(0, 10)
+  return `${prefix}${stamp}${r}`
 }
 
 // 訂單卡片用的明細：場地按日期分組，每個時段一行「時段 … 場號」（依時間、場號排序）；

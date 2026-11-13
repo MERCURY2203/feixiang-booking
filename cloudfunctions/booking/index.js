@@ -179,6 +179,12 @@ async function checkout(user, rawItems, expectTotal) {
     if (o) await ord.settle(cloud, db, o)
   }
 
+  // 日期鎖（澄清 K2）：先記下各日「營業時間版本」，事務裡再確認沒變；改營業時間會把版本加一
+  const courtDates = [...new Set(items.filter(i => i.type === 'court').map(i => i.date))]
+  const dayLocks = await loadByIds('locks', courtDates.map(d => `day_${d}`))
+  const hoursVer = {}
+  for (const d of courtDates) hoursVer[d] = (dayLocks[`day_${d}`] && dayLocks[`day_${d}`].hoursVer) || 0
+
   const q = await quote(items)
   const invalid = q.filter(i => !i.valid)
   if (invalid.length) return u.fail(invalid[0].reason === '已被预订' ? '部分场次已被预订' : '部分商品不可购买', 'INVALID_ITEMS', { invalid })
@@ -191,7 +197,7 @@ async function checkout(user, rawItems, expectTotal) {
 
   const created = Date.now()
   const order = {
-    _id: u.newId('FX'),
+    _id: u.newId('FX', 8),
     userId: user._id,
     openid: user.openid,
     phone: user.phone,
@@ -243,6 +249,13 @@ async function checkout(user, rawItems, expectTotal) {
     try {
       await ord.tx(db, async t => {
         // ---- 先讀 ----
+        // 訂單號已被用過（極少見的撞號）：整張換新號重來，絕不覆蓋別人的訂單（澄清 K1）
+        if (await ord.tget(t, 'orders', order._id)) return ord.rollbackWith(t, 'ID_TAKEN', '订单号冲突')
+        const days = {}
+        for (const d of courtDates) {
+          days[d] = await ord.tget(t, 'locks', `day_${d}`)
+          if (((days[d] && days[d].hoursVer) || 0) !== hoursVer[d]) return ord.rollbackWith(t, 'INVALID_ITEMS', '营业时间已调整，请刷新后重试')
+        }
         const claim = await ord.tget(t, 'user_pending', user._id)
         if (claim && claim.orderId) {
           const prev = await ord.tget(t, 'orders', claim.orderId)
@@ -265,6 +278,10 @@ async function checkout(user, rawItems, expectTotal) {
         }
 
         // ---- 再寫 ----
+        // 改寫日期鎖：和同時進行的「改營業時間」互斥，兩邊只有一邊能成功
+        for (const d of courtDates) {
+          await t.collection('locks').doc(`day_${d}`).set({ data: { hoursVer: hoursVer[d], n: ((days[d] && days[d].n) || 0) + 1, at: created } })
+        }
         await t.collection('user_pending').doc(user._id).set({ data: { orderId: order._id, at: created } })
         for (const it of itemDocs) {
           if (it.kind === 'court') {
@@ -290,6 +307,15 @@ async function checkout(user, rawItems, expectTotal) {
     } catch (e) {
       lastErr = e
       if (e.code === 'CODE_TAKEN') continue
+      if (e.code === 'ID_TAKEN') {
+        order._id = u.newId('FX', 8)
+        itemDocs.forEach((it, n) => {
+          it._id = `${order._id}_${n + 1}`
+          it.orderId = order._id
+        })
+        order.itemIds = itemDocs.map(i => i._id)
+        continue
+      }
       if (e.business) return u.fail(e.message, e.code === 'HAS_PENDING' ? 'HAS_PENDING' : 'INVALID_ITEMS', { orderId: e.orderId, invalid: [] })
       console.error('checkout tx', e)
       return u.fail('下单失败，请重试')

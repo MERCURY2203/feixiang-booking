@@ -42,9 +42,12 @@ Page({
     const { from, to } = this.range()
     if (from > to) return api.toast('开始日期不能晚于结束日期')
     wx.showLoading({ title: '统计中' })
+    // 只採用最後一次查詢的結果（澄清 K8）
+    const seq = (this.seq = (this.seq || 0) + 1)
     api
       .call('admin', 'report', { mode: this.data.mode, from, to })
       .then(r => {
+        if (seq !== this.seq) return
         wx.hideLoading()
         const f = formatFen
         this.setData({
@@ -58,6 +61,7 @@ Page({
         })
       })
       .catch(err => {
+        if (seq !== this.seq) return
         wx.hideLoading()
         api.toast(err.message)
       })

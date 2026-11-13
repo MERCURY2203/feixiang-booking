@@ -1,6 +1,6 @@
 <view class="container">
   <view class="card">
-    <view class="label">横幅图片（建议宽高比 5:2）</view>
+    <view class="label">横幅图片（建议宽高比 16:9）</view>
     <image wx:if="{{b.image}}" class="img" src="{{b.image}}" mode="aspectFill" bindtap="chooseImage" />
     <view wx:else class="img add" bindtap="chooseImage">＋ 上传图片</view>
   </view>

@@ -1040,6 +1040,302 @@ test('J3 微信已受理但本地記帳一直失敗：第 21 筆仍輪得到；�
   }
 })
 
+// ---------------- Codex 全項目審查（2026-11-12，F1–F10）回歸測試 ----------------
+
+const staff = F.loadFn('staff')
+const initdb = F.loadFn('initdb')
+const bookingUtil = require(path.join(ROOT, 'cloudfunctions/booking/lib/util.js'))
+// 讓「下一次事務開始前」先做 fn（用來模擬兩件事交錯）
+function beforeNextTx(fn) {
+  const db = F.db
+  const real = db.runTransaction
+  let done = false
+  db.runTransaction = async (body, ...args) => {
+    if (!done) {
+      done = true
+      db.runTransaction = real
+      await fn()
+    }
+    return real.call(db, body, ...args)
+  }
+  return () => (db.runTransaction = real)
+}
+
+test('F1 訂單號撞號：第二位客人自動換新號，第一位的訂單、卡片、場地都完整', async () => {
+  const a = must(await checkout('oA', [court(1, 19)]))
+  const real = bookingUtil.newId
+  let first = true
+  bookingUtil.newId = (prefix, n) => {
+    if (prefix === 'FX' && first) {
+      first = false
+      return a.orderId // 強制撞上第一位客人的訂單號
+    }
+    return real(prefix, n)
+  }
+  let b
+  try {
+    b = must(await checkout('oB', [court(2, 19)]))
+  } finally {
+    bookingUtil.newId = real
+  }
+  assert.notStrictEqual(b.orderId, a.orderId)
+  assert.strictEqual(doc('orders', a.orderId).userId, 'uA')
+  assert.strictEqual(doc('orders', b.orderId).userId, 'uB')
+  assert.strictEqual(itemsOf(a.orderId).length, 1)
+  assert.strictEqual(itemsOf(a.orderId)[0].court, 1)
+  assert.strictEqual(doc('slot_locks', `${D}_1_19`).orderId, a.orderId)
+  assert.strictEqual(doc('slot_locks', `${D}_2_19`).orderId, b.orderId)
+})
+
+test('F3 設休息日與下單交錯（休息日先存好）：下單被擋，沒有已付款場次落在休息日', async () => {
+  const restore = beforeNextTx(async () => {
+    must(await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true }))
+  })
+  let r
+  try {
+    r = await checkout('oA', [court(3, 19)])
+  } finally {
+    restore()
+  }
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(doc('slot_locks', `${D}_3_19`), null)
+  assert(all('business_hours').some(h => h.type === 'special' && h.date === D && h.closed))
+})
+
+test('F3b 設休息日存好後、查訂單前有人下單：下單失敗，休息日照常生效', async () => {
+  // 讓 saveSpecial 的第一個事務（存新設定）完成後，馬上有客人嘗試下單
+  const db = F.db
+  const real = db.runTransaction
+  let attempt = null
+  db.runTransaction = async (body, ...args) => {
+    const v = await real.call(db, body, ...args)
+    if (!attempt) {
+      db.runTransaction = real
+      attempt = await checkout('oA', [court(3, 19)])
+    }
+    return v
+  }
+  let r
+  try {
+    r = await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true })
+  } finally {
+    db.runTransaction = real
+  }
+  assert.strictEqual(attempt.ok, false)
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(all('orders').filter(o => o.status === 'active' || o.status === 'pending').length, 0)
+})
+
+test('F3c 已有訂單時設休息日：還原設定並提示，場次照常', async () => {
+  const id = await buy('oA', [court(4, 19)])
+  const r = await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true })
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(r.code, 'HAS_ORDERS')
+  assert(!all('business_hours').some(h => h.type === 'special' && h.date === D))
+  assert.strictEqual(doc('orders', id).status, 'active')
+  // 還原後客人照常能訂這天的其他場
+  must(await checkout('oB', [court(5, 19)]))
+})
+
+test('F3d 改常用營業時間與下單：改完後下單看到新時間；有訂單在外就還原', async () => {
+  const id = await buy('oA', [court(1, 21)])
+  const r = await call(admin, 'oO', { action: 'saveDailyHours', open: 9, close: 21 })
+  assert.strictEqual(r.code, 'HAS_ORDERS')
+  assert.strictEqual(doc('orders', id).status, 'active')
+  must(await checkout('oB', [court(2, 21)])) // 還原後 21 點仍可訂
+})
+
+test('F2 兩人同時用老闆預設手機號綁定：只有一位老闆，設定與角色一致', async () => {
+  store.write('settings', 'owner', { ownerId: 'uO', presetPhone: '13800000000' })
+  store.write('users', 'uP', { openid: 'oP', role: 'customer', phone: '' })
+  store.write('users', 'uQ', { openid: 'oQ', role: 'customer', phone: '' })
+  const rs = await Promise.all([call(user, 'oP', { action: 'bindPhone', code: 'a' }), call(user, 'oQ', { action: 'bindPhone', code: 'b' })])
+  rs.forEach(must)
+  const owners = all('users').filter(x => x.role === 'owner')
+  assert.strictEqual(owners.length, 1)
+  assert.strictEqual(doc('settings', 'owner').ownerId, owners[0]._id)
+  assert.strictEqual(doc('settings', 'owner').presetPhone, '')
+  assert(['uP', 'uQ'].includes(owners[0]._id))
+})
+
+test('F10 新客人同時點兩次「同意」：只有一個帳號', async () => {
+  const rs = await Promise.all([
+    call(user, 'oNew', { action: 'agreePrivacy', version: 'v' }),
+    call(user, 'oNew', { action: 'agreePrivacy', version: 'v' }),
+    call(user, 'oNew', { action: 'agreePrivacy', version: 'v' })
+  ])
+  rs.forEach(must)
+  const list = all('users').filter(x => x.openid === 'oNew')
+  assert.strictEqual(list.length, 1)
+  assert(/^U[0-9a-f]{24}$/.test(list[0]._id))
+  assert.strictEqual(list[0].agreedPrivacyVersion, 'v')
+})
+
+test('F10b initdb 合併重複帳號：訂單和角色接到保留帳號，重複帳號標記不刪除；進度完成後清除', async () => {
+  store.write('users', 'uD1', { openid: 'oDup', role: 'customer', phone: '', createdAt: 1 })
+  store.write('users', 'uD2', { openid: 'oDup', role: 'staff', phone: '13700000000', createdAt: 2 })
+  store.write('orders', 'OD1', { userId: 'uD1', status: 'completed', itemIds: ['OD1_1'], totalFee: 100, createdAt: BASE })
+  store.write('order_items', 'OD1_1', { orderId: 'OD1', userId: 'uD1', kind: 'product', productId: 'p1', price: 100, qty: 1, code: '', codeActive: false })
+  const r = await call(initdb, '', {})
+  assert.strictEqual(r.migration.done, true)
+  assert.deepStrictEqual(r.migration.usersMerged, [{ from: 'uD1', into: 'uD2' }])
+  assert.strictEqual(doc('orders', 'OD1').userId, 'uD2')
+  assert.strictEqual(doc('order_items', 'OD1_1').userId, 'uD2')
+  assert.strictEqual(doc('users', 'uD1').mergedInto, 'uD2')
+  assert.strictEqual(all('users').filter(x => x.openid === 'oDup').length, 1)
+  assert.strictEqual(doc('settings', 'initdb_progress'), null)
+  const again = await call(initdb, '', {}) // 再執行一次不會重複修改
+  assert.deepStrictEqual(again.migration.usersMerged, [])
+})
+
+test('F4 刪除商品時剛好有人買了：刪除被拒，商品和訂單都在', async () => {
+  store.write('products', 'p3', { ...doc('products', 'p1'), name: '新品' })
+  // 刪除事務讀到「從未售出」、還沒提交時，客人完成購買
+  const db = F.db
+  const real = db.runTransaction
+  let bought = null
+  let started = false
+  db.runTransaction = (body, ...args) => real.call(db, async t => {
+    const v = await body(t)
+    if (!started) {
+      started = true
+      db.runTransaction = real // 客人的下單用正常事務
+      bought = await buy('oA', [product('p3')])
+    }
+    return v
+  }, ...args)
+  let del
+  try {
+    del = await call(admin, 'oO', { action: 'productDelete', id: 'p3' })
+  } finally {
+    db.runTransaction = real
+  }
+  assert.strictEqual(del.ok, false)
+  assert(doc('products', 'p3'))
+  assert(bought && doc('orders', bought).status === 'active')
+})
+
+test('F4a 刪除先完成，同時進行的下單整單失敗', async () => {
+  store.write('products', 'p3', { ...doc('products', 'p1'), name: '新品' })
+  const restore = beforeNextTx(async () => must(await call(admin, 'oO', { action: 'productDelete', id: 'p3' })))
+  let r
+  try {
+    r = await checkout('oA', [product('p3'), court(1, 19)])
+  } finally {
+    restore()
+  }
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(doc('slot_locks', `${D}_1_19`), null)
+})
+
+test('F4b 買過的商品下架後：客人看不到、不能買；已買的券照常可核銷、可退款', async () => {
+  const id = await buy('oA', [product('p1', 3)])
+  const it = itemsOf(id)[0]
+  must(await call(admin, 'oO', { action: 'productToggle', id: 'p1', onShelf: false }))
+  mustFail(await checkout('oB', [product('p1')]))
+  const shelf = must(await call(booking, 'oB', { action: 'products' }))
+  assert(!shelf.some(p => p._id === 'p1'))
+  // 核銷
+  must(await call(admin, 'oO', { action: 'verifyLookup', code: it.code }))
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: it._id, qty: 1, reqId: 'req-off-0001' }))
+  // 客人自己退一張
+  const d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  assert.strictEqual(d.items[0].canRefund, true)
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  // 管理端退一張
+  must(await call(admin, 'oO', { action: 'refund', orderId: id, parts: [{ itemId: it._id, qty: 1, amount: it.price }] }))
+  const after = doc('order_items', it._id)
+  assert.strictEqual(after.verifiedQty, 1)
+  assert.strictEqual(after.refundedQty, 2)
+  assert.strictEqual(wechat.refundedTotal(id), 2 * it.price)
+})
+
+test('F4c 固定日期活動下架後過期：已買未用的券照常自動退款', async () => {
+  const id = await buy('oA', [product('p2', 2)])
+  must(await call(admin, 'oO', { action: 'productToggle', id: 'p2', onShelf: false }))
+  clock.now = Date.UTC(2026, 10, 12, 2, 0, 0)
+  await runTimer()
+  assert.strictEqual(itemsOf(id)[0].expiredQty, 2)
+  assert.strictEqual(wechat.refundedTotal(id), 2 * 8800)
+})
+
+test('F5 同時保存兩筆重疊的單日價格：只有一筆成功，另一筆提示衝突', async () => {
+  const rule = { dates: [D], startHour: 19, endHour: 20, courts: [1], price: 7000 }
+  const rs = await Promise.all([call(admin, 'oO', { action: 'saveDaily', rule }), call(admin, 'oO', { action: 'saveDaily', rule: { ...rule, price: 9000 } })])
+  assert.strictEqual(rs.filter(r => r.ok).length, 1)
+  assert.strictEqual(rs.find(r => !r.ok).code, 'CONFLICT')
+  assert.strictEqual(all('prices').filter(p => p.type === 'daily').length, 1)
+})
+
+test('F6 新員工第一次掃邀請碼：同意協議後自動綁定；不同意不會用掉邀請碼', async () => {
+  store.write('invites', 'CODE1', { type: 'staff', used: false, expiresAt: BASE + 10 * MIN })
+  const api = {
+    toast() {},
+    async call(svc, action, params) {
+      const r = await call(svc === 'staff' ? staff : user, 'oStaff', { action, ...params })
+      if (!r.ok) throw new Error(r.message)
+      return r.data
+    }
+  }
+  const app = {
+    globalData: {},
+    userReady: api.call('user', 'login'),
+    refreshUser: () => api.call('user', 'login').then(u => (app.globalData.user = u))
+  }
+  const page = loadPage('miniprogram/pages/bind/index.js', { '/api': api }, { getApp: () => app, wx: {} })
+  page.onLoad({ scene: 'CODE1' })
+  await app.userReady
+  await F.tick()
+  assert.strictEqual(page.data.status, 'wait')
+  assert.strictEqual(doc('invites', 'CODE1').used, false) // 還沒同意：邀請碼沒被用掉
+  must(await call(user, 'oStaff', { action: 'agreePrivacy', version: 'v' }))
+  await page.onAgreed()
+  for (let i = 0; i < 10; i++) await F.tick()
+  assert.strictEqual(page.data.status, 'ok')
+  assert.strictEqual(doc('invites', 'CODE1').used, true)
+  assert.strictEqual(all('users').find(x => x.openid === 'oStaff').role, 'staff')
+})
+
+test('F7 我的订单：舊分頁的結果晚到，不會蓋掉新分頁', async () => {
+  const qs = []
+  const api = { toast() {}, call: (_s, _a, p) => new Promise(r => qs.push({ tab: p.tab, r })) }
+  const page = loadPage('miniprogram/pages/order/list/index.js', {
+    '/api': api, '/cards': { split: () => [], linesOf: () => [] }, '/money': { formatFen: String },
+    '/time': { syncServerTime() {}, formatBeijing: String, now: () => BASE }
+  })
+  page.tick = () => {}
+  const old = page.load(true)
+  page.switchTab({ currentTarget: { dataset: { key: 'refund' } } })
+  qs[1].r({ list: [{ _id: 'refund', status: 'refunded' }], more: false })
+  await F.tick()
+  qs[0].r({ list: [{ _id: 'unpaid', status: 'pending' }], more: false })
+  await old
+  await F.tick()
+  assert.strictEqual(page.data.tab, 'refund')
+  assert.deepStrictEqual(page.data.list.map(o => o._id), ['refund'])
+})
+
+test('F8 付了舊訂單（×1）後，購物車只扣 1，後來加的 2 張保留', async () => {
+  let data = [{ type: 'product', productId: 'p1', qty: 3 }, { type: 'court', date: D, court: 1, hour: 19 }]
+  const ctx = { module: { exports: {} }, wx: { getStorageSync: () => data, setStorageSync: (_k, v) => (data = v) }, require: () => ({}) }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/cart.js'), 'utf8'), ctx)
+  ctx.module.exports.removeBought([{ type: 'product', productId: 'p1', qty: 1 }, { type: 'court', date: D, court: 1, hour: 19 }])
+  assert.strictEqual(JSON.stringify(data), JSON.stringify([{ type: 'product', productId: 'p1', qty: 2 }]))
+})
+
+test('F9 橫幅按「同一時刻」計算上限：不同日子的限時橫幅可超過 5 張；同時段第 6 張被拒；同時上架不能突破', async () => {
+  const banner = (day, extra = {}) => ({ image: 'cloud://b', mode: 'timed', enabled: true, startDate: `2026-11-${day}`, startTime: '10:00', endDate: `2026-11-${day}`, endTime: '11:00', ...extra })
+  for (let i = 0; i < 6; i++) must(await call(admin, 'oO', { action: 'bannerSave', banner: banner(11 + i) }))
+  // 11 日同一時段再加 4 張（共 5 張），第 6 張被拒
+  for (let i = 0; i < 4; i++) must(await call(admin, 'oO', { action: 'bannerSave', banner: banner(11) }))
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: banner(11) }), /5 张/)
+  // 長期橫幅會和 11 日那 5 張重疊，也被拒
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: { image: 'cloud://b', mode: 'long', enabled: true } }), /5 张/)
+  // 12 日只有 1 張：同時上架 5 張，最多只能再成功 4 張
+  const rs = await Promise.all([0, 1, 2, 3, 4].map(() => call(admin, 'oO', { action: 'bannerSave', banner: banner(12) })))
+  assert.strictEqual(rs.filter(r => r.ok).length, 4)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

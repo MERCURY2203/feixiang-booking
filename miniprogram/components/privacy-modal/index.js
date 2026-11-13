@@ -36,6 +36,7 @@ Component({
           wx.setStorageSync(STORAGE_KEY, PRIVACY_VERSION)
           getApp().refreshUser().catch(() => {})
           this.setData({ step: 'phone' })
+          this.triggerEvent('agreed') // 綁定頁等這個事件再自動綁定（澄清 K7）
         })
         .catch(() => api.toast('网络不太好，请再点一次“同意并继续”'))
         .finally(() => (this.agreeing = false))

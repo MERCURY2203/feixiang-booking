@@ -55,9 +55,19 @@ function sameItem(a, b) {
   return a.type === 'court' ? courtKey(a) === courtKey(b) : a.productId === b.productId
 }
 
-// 付款成功後，已買的項目自動從購物車移除（澄清 C4）
+// 付款成功後，已買的項目自動從購物車移除（澄清 C4）。
+// 商品只扣掉這張訂單買了的數量，結算之後才加的保留（澄清 K9）；場地按格子移除
 function removeBought(bought) {
-  save(list().filter(i => !bought.some(b => sameItem(i, b))))
+  const items = []
+  for (const i of list()) {
+    const b = bought.find(x => sameItem(i, x))
+    if (!b) items.push(i)
+    else if (i.type === 'product') {
+      const left = (i.qty || 0) - (b.qty || 0)
+      if (left > 0) items.push({ ...i, qty: left })
+    }
+  }
+  save(items)
 }
 
 function count() {
