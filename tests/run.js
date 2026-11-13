@@ -1336,6 +1336,43 @@ test('F9 橫幅按「同一時刻」計算上限：不同日子的限時橫幅�
   assert.strictEqual(rs.filter(r => r.ok).length, 4)
 })
 
+test('initdb 在沒有資料要整理時也能順利完成（不存空記錄）；中途超時後可接著做', async () => {
+  store.reset() // 全新、空的資料庫
+  let r = await call(initdb, '', {})
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.migration.done, true)
+  assert.strictEqual(doc('settings', 'initdb_progress'), null)
+  // 有一點舊資料、且這次執行時間不夠：返回 done:false，進度存下，再執行一次就完成
+  seed()
+  store.write('orders', 'OLD1', { userId: 'uA', status: 'completed', totalFee: 100, createdAt: BASE })
+  store.write('order_items', 'OLD1_1', { orderId: 'OLD1', userId: 'uA', kind: 'product', productId: 'p1', price: 100, qty: 1, code: '' })
+  // 模擬執行到一半時間用完：處理第一張訂單時把時鐘往後撥 2 分鐘（超過 50 秒的執行預算）
+  const db = F.db
+  const realColl = db.collection
+  db.collection = name => {
+    const c = realColl.call(db, name)
+    if (name === 'order_items') {
+      const where = c.where.bind(c)
+      c.where = cond => {
+        if (cond && cond.orderId === 'OLD1') clock.now += 2 * MIN
+        return where(cond)
+      }
+    }
+    return c
+  }
+  try {
+    r = await call(initdb, '', {})
+  } finally {
+    db.collection = realColl
+  }
+  assert.strictEqual(r.migration.done, false)
+  assert(doc('settings', 'initdb_progress'))
+  r = await call(initdb, '', {})
+  assert.strictEqual(r.migration.done, true)
+  assert.deepStrictEqual(doc('orders', 'OLD1').itemIds, ['OLD1_1'])
+  assert.strictEqual(doc('settings', 'initdb_progress'), null)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

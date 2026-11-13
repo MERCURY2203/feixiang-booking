@@ -137,6 +137,7 @@ function makeDb(store) {
         return { total: store.all(name).filter(d => matches(d, cond)).length }
       },
       async update({ data }) {
+        assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
         await tick()
         const list = store.all(name).filter(d => matches(d, cond))
         for (const d of list) store.write(name, d._id, applyUpdate(d, data))
@@ -156,12 +157,14 @@ function makeDb(store) {
           return { data: r.doc }
         },
         async set({ data }) {
+          assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
           await tick()
           if ('_id' in data) throw new Error('set 的 data 不能包含 _id')
           store.write(name, id, data)
           return { stats: { updated: 1 } }
         },
         async update({ data }) {
+          assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
           await tick()
           const r = store.read(name, id)
           if (!r.doc) return { stats: { updated: 0 } }
@@ -175,6 +178,7 @@ function makeDb(store) {
         }
       }),
       async add({ data }) {
+        assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
         await tick()
         const id = data._id || `auto${++store.idSeq}`
         if (store.read(name, id).doc) throw new Error('duplicate _id')
@@ -212,12 +216,14 @@ function makeDb(store) {
               return { data: d }
             },
             async set({ data }) {
+              assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
               await tick()
               if ('_id' in data) throw new Error('set 的 data 不能包含 _id')
               touch(c, id)
               buf.set(key(c, id), { ...clone(data), _id: id })
             },
             async update({ data }) {
+              assertNotEmpty(data) // 和微信雲開發一樣：data 不能是空的
               await tick()
               touch(c, id)
               const d = current(c, id)
@@ -312,6 +318,11 @@ function wxTime(ts) {
 }
 function parseWx(s) {
   return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12), +s.slice(12, 14)) - 8 * 3600e3
+}
+
+// 微信雲開發的 set/update/add 不接受空的 data（errMsg: options.data must not be empty）
+function assertNotEmpty(data) {
+  if (!data || typeof data !== 'object' || !Object.keys(data).length) throw new Error('options.data must not be empty')
 }
 
 const ctx = { openid: '' }

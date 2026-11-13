@@ -36,6 +36,12 @@ async function getDoc(coll, id) {
 
 // 按 _id 順序逐批處理，處理過的不會重複；每批處理完把位置存進 settings/initdb_progress，
 // 時間不夠時返回 false，下次執行從存下的位置繼續（澄清 K12）
+// 存進度：一定附上保存時間（微信雲開發不允許存空記錄）
+function saveProgress(progress) {
+  const { _id, ...data } = progress
+  return db.collection('settings').doc('initdb_progress').set({ data: { ...data, savedAt: Date.now() } })
+}
+
 async function scan(progress, key, coll, cond, deadline, fn) {
   let last = progress[key] || ''
   for (;;) {
@@ -48,10 +54,10 @@ async function scan(progress, key, coll, cond, deadline, fn) {
       last = d._id
       progress[key] = last
     }
-    await db.collection('settings').doc('initdb_progress').set({ data: progress })
+    await saveProgress(progress)
     if (res.data.length < 100) {
       progress[key] = 'DONE'
-      await db.collection('settings').doc('initdb_progress').set({ data: progress })
+      await saveProgress(progress)
       return true
     }
   }
