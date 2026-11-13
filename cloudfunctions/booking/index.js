@@ -319,24 +319,26 @@ function itemView(order, it, now, admin) {
   if (it.kind === 'court') {
     v.title = `${u.cnDate(it.date)} ${u.hourRange(it.hour)} ${it.court}号场`
     const refunded = ord.courtFullyRefunded(it)
-    v.state = refunded ? '已退款' : !paidish ? '' : it.startAt + u.HOUR <= now ? '已使用' : it.startAt <= now ? '进行中' : '待使用'
+    v.state = refunded ? '已退款' : !paidish ? '' : it.refunding ? '退款中' : it.startAt + u.HOUR <= now ? '已使用' : it.startAt <= now ? '进行中' : '待使用'
     v.refundable = ord.itemRefundable(it)
     v.canRefund = paidish && !refunded && it.startAt - CANCEL_BEFORE > now && !it.refunding
-    v.refundHint = refunded ? '已退款' : paidish && it.startAt - CANCEL_BEFORE <= now ? '已过可退时间' : ''
+    v.refundHint = refunded ? '已退款' : it.refunding ? '退款处理中，请稍候' : paidish && it.startAt - CANCEL_BEFORE <= now ? '已过可退时间' : ''
   } else {
     v.title = `${it.name} ×${it.qty}`
     v.image = it.image
     v.available = ord.productAvailable(it)
     const parts = []
     if (v.available > 0) parts.push(`未使用 ${v.available}`)
+    // 同一張卡片的幾張券共用一個券碼，退款中按張數顯示（澄清 I2）
+    if (it.refunding && it.refundingQty) parts.push(`退款中 ${it.refundingQty}`)
     if (it.verifiedQty) parts.push(`已核销 ${it.verifiedQty}`)
     if (it.refundedQty) parts.push(`已退款 ${it.refundedQty}`)
     if (it.expiredQty) parts.push(`已过期 ${it.expiredQty}`)
-    v.state = paidish ? parts.join(' · ') : ''
+    v.state = paidish ? parts.join(' · ') || (it.refunding ? '退款中' : '') : ''
     v.refundable = ord.itemRefundable(it)
     const tooLate = it.fixedDate && it.activityStartAt - CANCEL_BEFORE <= now
     v.canRefund = paidish && v.available > 0 && !tooLate && !it.refunding
-    v.refundHint = v.available <= 0 ? '' : paidish && tooLate ? '已过可退时间' : ''
+    v.refundHint = it.refunding && paidish ? '退款处理中，请稍候' : v.available <= 0 ? '' : paidish && tooLate ? '已过可退时间' : ''
     v.hasCode = paidish && !!it.codeActive && v.available > 0
     if (it.fixedDate) v.note = `活动时间：${u.cnDate(it.activityDate)} ${u.pad(new Date(it.activityStartAt + 8 * u.HOUR).getUTCHours())}:${u.pad(new Date(it.activityStartAt + 8 * u.HOUR).getUTCMinutes())}`
   }
@@ -352,17 +354,26 @@ const STATUS_TEXT = {
   completed: '已完成', refunded: '已退款', timeout_refunded: '超时已退款'
 }
 
-function statusText(order) {
+// refunding = 這張訂單有退款還在處理中（澄清 I2）：退款成功前不顯示「已退款」
+function statusText(order, refunding) {
   if (order.status === 'timeout_refunded' && order.refundState !== 'success') return '超时退款处理中'
-  if ((order.status === 'active' || order.status === 'completed') && order.refundedFee > 0) {
-    return `${STATUS_TEXT[order.status]} · 部分退款`
+  if (order.status === 'active' || order.status === 'completed') {
+    if (refunding) return `${STATUS_TEXT[order.status]} · 退款处理中`
+    if (order.refundedFee > 0) return `${STATUS_TEXT[order.status]} · 部分退款`
   }
   return STATUS_TEXT[order.status] || order.status
 }
 
-function orderView(order) {
+// 這批訂單中，哪些有退款還在處理中
+async function refundingOrderIds(ids) {
+  if (!ids.length) return new Set()
+  const res = await db.collection('refunds').where({ orderId: _.in(ids), status: _.in(['pending', 'unknown']), kind: _.neq('timeout') }).limit(100).get()
+  return new Set(res.data.map(r => r.orderId))
+}
+
+function orderView(order, refunding) {
   return {
-    _id: order._id, status: order.status, statusText: statusText(order), totalFee: order.totalFee,
+    _id: order._id, status: order.status, statusText: statusText(order, refunding), totalFee: order.totalFee,
     refundedFee: order.refundedFee || 0, createdAt: order.createdAt, expiresAt: order.expiresAt,
     summary: order.summary, lines: order.lines || u.legacyLines(order.summary), confirming: !!order.confirming
   }
@@ -379,9 +390,10 @@ async function myOrders(user, tab, skip) {
   for (let o of res.data) {
     if (o.status === 'pending' && o.expiresAt < Date.now()) o = await ord.settle(cloud, db, o)
     if (tab === 'pending' && o.status !== 'pending') continue
-    list.push(orderView(o))
+    list.push(o)
   }
-  return { list, serverNow: Date.now(), more: res.data.length === 20 }
+  const refunding = await refundingOrderIds(list.filter(o => o.status === 'active' || o.status === 'completed').map(o => o._id))
+  return { list: list.map(o => orderView(o, refunding.has(o._id))), serverNow: Date.now(), more: res.data.length === 20 }
 }
 
 async function loadOwnOrder(user, orderId) {
@@ -398,7 +410,7 @@ async function orderDetail(user, orderId) {
   const items = (await ord.getItems(db, orderId)).sort((a, b) => (a._id < b._id ? -1 : 1))
   const now = Date.now()
   return u.ok({
-    order: orderView(order),
+    order: orderView(order, items.some(it => it.refunding)),
     items: items.map(it => itemView(order, it, now, false)),
     hasCourt: order.hasCourt,
     serverNow: now

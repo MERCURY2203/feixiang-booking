@@ -33,6 +33,8 @@ Page({
       .call('admin', 'verifyLookup', { code })
       .then(info => {
         wx.hideLoading()
+        // 這次核銷的操作編號：網絡出錯後再按「确认核销」沿用同一個，系統只會扣一次（澄清 I1）
+        this.reqId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
         this.setData({ info, qty: info.available })
       })
       .catch(err => {
@@ -47,18 +49,23 @@ Page({
   },
 
   close() {
+    this.reqId = ''
     this.setData({ info: null })
   },
 
   confirm() {
     const { info, qty } = this.data
+    if (this.busy) return
+    this.busy = true
     api
-      .call('admin', 'verifyConfirm', { itemId: info.itemId, qty })
+      .call('admin', 'verifyConfirm', { itemId: info.itemId, qty, reqId: this.reqId })
       .then(r => {
+        this.reqId = ''
         this.setData({ info: null, code: '' })
-        wx.showModal({ title: '核销成功', content: `已核销 ${qty} 张${r.left ? `，剩余可用 ${r.left} 张` : ''}`, showCancel: false })
+        wx.showModal({ title: '核销成功', content: `已核销 ${r.qty || qty} 张${r.left ? `，剩余可用 ${r.left} 张` : ''}`, showCancel: false })
       })
       .catch(err => api.toast(err.message))
+      .then(() => (this.busy = false))
   },
 
   goLogs() {

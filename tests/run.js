@@ -897,6 +897,149 @@ test('H8 下單滿 3 年但券最近才核銷：交易完成未滿 3 年，暫�
   assert(o.anonymizedAt && o.openid === '' && o.userId === '')
 })
 
+// ---------------- Codex 複查報告（2026-11-12，J1–J3）回歸測試 ----------------
+
+const adminOrd = require(path.join(ROOT, 'cloudfunctions/admin/lib/orders.js'))
+// 讓「某個事務」在提交時失敗：pred(事務返回值) 為真時拋錯
+async function withTxFailure(pred, fn) {
+  const db = F.db
+  const real = db.runTransaction
+  db.runTransaction = async (body, ...args) => real.call(db, async t => {
+    const v = await body(t)
+    if (pred(v)) throw new Error('database commit failed')
+    return v
+  }, ...args)
+  try {
+    return await fn()
+  } finally {
+    db.runTransaction = real
+  }
+}
+
+test('J1 核銷記錄寫不進去時，券也不扣；同一操作編號重試只扣一次、只有一筆記錄', async () => {
+  const id = await buy('oA', [product('p1', 2)])
+  const it = itemsOf(id)[0]
+  const ev = { action: 'verifyConfirm', itemId: it._id, qty: 1, reqId: 'req-abc-001' }
+  const first = await withTxFailure(v => v && v.log, () => call(admin, 'oO', ev))
+  assert.strictEqual(first.ok, false)
+  assert.strictEqual(doc('order_items', it._id).verifiedQty || 0, 0) // 一起失敗
+  assert.strictEqual(all('verify_logs').length, 0)
+  const second = must(await call(admin, 'oO', ev)) // 恢復後重按
+  assert.strictEqual(second.left, 1)
+  const third = must(await call(admin, 'oO', ev)) // 回覆丟失後再按一次：認出已做過
+  assert.strictEqual(third.repeat, true)
+  assert.strictEqual(doc('order_items', it._id).verifiedQty, 1)
+  const logs = all('verify_logs').filter(l => l.type === 'verify')
+  assert.strictEqual(logs.length, 1)
+  // 這一筆可以當天撤銷；撤銷重按也只撤銷一次
+  must(await call(admin, 'oO', { action: 'verifyUndo', logId: logs[0]._id }))
+  must(await call(admin, 'oO', { action: 'verifyUndo', logId: logs[0]._id }))
+  assert.strictEqual(doc('order_items', it._id).verifiedQty, 0)
+  assert.strictEqual(all('verify_logs').filter(l => l.type === 'undo').length, 1)
+  // 正常的下一次核銷（新編號）照常扣
+  must(await call(admin, 'oO', { ...ev, reqId: 'req-abc-002' }))
+  assert.strictEqual(doc('order_items', it._id).verifiedQty, 1)
+})
+
+test('J1b 扣券和記錄已完成，只是更新訂單狀態失敗：回覆成功，不引導重複核銷', async () => {
+  const id = await buy('oA', [product('p1', 1)])
+  const it = itemsOf(id)[0]
+  const real = adminOrd.refreshStatus
+  adminOrd.refreshStatus = async () => { throw new Error('status update failed') }
+  let r
+  try {
+    r = await call(admin, 'oO', { action: 'verifyConfirm', itemId: it._id, qty: 1, reqId: 'req-xyz-001' })
+  } finally {
+    adminOrd.refreshStatus = real
+  }
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(doc('order_items', it._id).verifiedQty, 1)
+  assert.strictEqual(all('verify_logs').length, 1)
+  // 客人打開訂單時重新計算狀態
+  const d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  assert.strictEqual(d.order.status, 'completed')
+})
+
+test('J2 退款處理中：卡片按張數顯示退款中，其餘券照常可用；訂單顯示退款处理中', async () => {
+  const id = await buy('oA', [product('p1', 3)])
+  const it = itemsOf(id)[0]
+  wechat.loseNextRefundResponse = true // 微信已受理、回覆丟失
+  const r = must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  assert.strictEqual(r.processing, true)
+  let d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  let v = d.items[0]
+  assert.strictEqual(v.state, '未使用 2 · 退款中 1')
+  assert.strictEqual(v.refundHint, '退款处理中，请稍候')
+  assert.strictEqual(v.hasCode, true)
+  assert.strictEqual(v.canRefund, false)
+  assert.strictEqual(d.order.statusText, '待使用 · 退款处理中')
+  const list = must(await call(booking, 'oA', { action: 'myOrders', tab: 'all' }))
+  assert.strictEqual(list.list.find(o => o._id === id).statusText, '待使用 · 退款处理中')
+  const ad = must(await call(admin, 'oO', { action: 'orderDetail', orderId: id }))
+  assert.strictEqual(ad.items[0].state, '未使用 2 · 退款中 1')
+  assert.strictEqual(ad.order.statusText, '待使用 · 退款处理中')
+  // 定時任務確認退款成功後
+  clock.now += 3 * MIN
+  await runTimer()
+  d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  v = d.items[0]
+  assert.strictEqual(v.state, '未使用 2 · 已退款 1')
+  assert.strictEqual(d.order.statusText, '待使用 · 部分退款')
+  assert.strictEqual(v.canRefund, true)
+})
+
+test('J2b 退款處理中後被微信拒絕：卡片恢復可用、可退，不顯示已退款', async () => {
+  const id = await buy('oA', [product('p1', 2)])
+  const it = itemsOf(id)[0]
+  const real = cloudPay.refund
+  try {
+    cloudPay.refund = async () => { throw new Error('timeout') }
+    must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  } finally {
+    cloudPay.refund = real
+  }
+  wechat.rejectRefunds = true
+  clock.now += 3 * MIN
+  await runTimer()
+  const d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  assert.strictEqual(d.items[0].state, '未使用 2')
+  assert.strictEqual(d.items[0].canRefund, true)
+  assert.strictEqual(d.order.statusText, '待使用')
+})
+
+test('J3 微信已受理但本地記帳一直失敗：第 21 筆仍輪得到；恢復後每筆只退一次、帳目一致', async () => {
+  for (let n = 0; n < 21; n++) {
+    const oid = `O${n}`, iid = `I${n}`, rid = `${oid}R01`
+    store.write('orders', oid, { userId: 'uA', status: 'active', itemIds: [iid], totalFee: 100, refundCount: 1, refundSeq: 1, createdAt: BASE })
+    store.write('order_items', iid, { orderId: oid, kind: 'product', productId: 'p1', qty: 1, price: 100, refunding: rid, refundingFee: 100, refundingQty: 1, codeActive: true })
+    store.write('refunds', rid, { orderId: oid, kind: 'items', status: 'pending', amount: 100, parts: [{ itemId: iid, qty: 1, amount: 100 }], at: BASE - 10 * MIN + n })
+    wechat.orders[oid] = { state: 'SUCCESS', totalFee: 100 }
+  }
+  const failing = v => v && v.refund && v.refund.orderId !== 'O20'
+  await withTxFailure(failing, async () => {
+    for (let n = 0; n < 4; n++) {
+      await runTimer()
+      clock.now += MIN
+    }
+  })
+  assert.strictEqual(wechat.refundedTotal('O20'), 100)
+  assert.strictEqual(doc('refunds', 'O20R01').status, 'success')
+  assert.strictEqual(doc('refunds', 'O0R01').status, 'unknown') // 保留預留，不當失敗
+  assert(doc('refunds', 'O0R01').nextRetryAt > 0)
+  assert.strictEqual(doc('order_items', 'I0').refunding, 'O0R01')
+  // 記帳恢復後
+  for (let n = 0; n < 15; n++) {
+    await runTimer()
+    clock.now += MIN
+  }
+  for (let n = 0; n < 21; n++) {
+    assert.strictEqual(doc('refunds', `O${n}R01`).status, 'success')
+    assert.strictEqual(wechat.refundedTotal(`O${n}`), 100)
+    assert.strictEqual(doc('orders', `O${n}`).refundedFee, 100)
+    assert.strictEqual(doc('order_items', `I${n}`).refundedQty, 1)
+  }
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

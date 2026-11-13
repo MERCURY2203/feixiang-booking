@@ -23,10 +23,14 @@ const STATUS_TEXT = {
   pending: '待支付', cancelled: '已取消', closed: '已关闭', active: '待使用',
   completed: '已完成', refunded: '已退款', timeout_refunded: '超时已退款'
 }
-function statusText(o) {
+function statusText(o, refunding) {
   if (o.status === 'timeout_refunded' && o.refundState !== 'success') return o.refundState === 'failed' ? '超时退款失败·请人工处理' : '超时退款处理中'
   const base = STATUS_TEXT[o.status] || o.status
-  return (o.status === 'active' || o.status === 'completed') && o.refundedFee > 0 ? `${base} · 部分退款` : base
+  if (o.status === 'active' || o.status === 'completed') {
+    if (refunding) return `${base} · 退款处理中`
+    if (o.refundedFee > 0) return `${base} · 部分退款`
+  }
+  return base
 }
 
 function hm(ts) {
@@ -58,13 +62,22 @@ async function verifyLookup(code) {
   return u.ok({ itemId: it._id, name: it.name, phone: u.maskPhone(order.phone), available, code: it.code })
 }
 
-// 核銷（事務）：重新讀取卡片和訂單，確認已付款、未過期、張數足夠（退款處理中的張數不算可用）
-async function verifyConfirm(user, itemId, qty) {
+// 核銷（事務）：重新讀取卡片和訂單，確認已付款、未過期、張數足夠（退款處理中的張數不算可用）。
+// 扣券和核銷記錄在同一個事務裡寫入，要嘛一起成功、要嘛一起失敗（澄清 I1）。
+// reqId 是前端每次打開核銷確認時產生的操作編號，核銷記錄就用它當編號：
+// 同一編號重試（例如網絡出錯後再按一次）時認出已做過，直接返回原結果，不會再扣券。
+async function verifyConfirm(user, itemId, qty, reqId) {
   qty = Number(qty)
   if (!Number.isInteger(qty) || qty < 1) return u.fail('请选择核销张数')
+  const logId = /^[A-Za-z0-9_-]{8,40}$/.test(String(reqId || '')) ? `V${reqId}` : u.newId('V')
   let result
   try {
     result = await ord.tx(db, async t => {
+      const done = await ord.tget(t, 'verify_logs', logId)
+      if (done) {
+        if (done.itemId !== String(itemId || '') || done.type !== 'verify') return ord.rollbackWith(t, 'BAD', '操作编号重复，请重新扫码')
+        return { repeat: true, log: done }
+      }
       const it = await ord.tget(t, 'order_items', String(itemId || ''))
       if (!it || it.kind !== 'product') return ord.rollbackWith(t, 'BAD', '券码已失效')
       const order = await ord.tget(t, 'orders', it.orderId)
@@ -74,22 +87,22 @@ async function verifyConfirm(user, itemId, qty) {
       if (!it.codeActive || available <= 0) return ord.rollbackWith(t, 'BAD', '券码已失效')
       if (qty > available) return ord.rollbackWith(t, 'BAD', `最多可核销 ${available} 张`)
       const left = available - qty
+      const now = Date.now()
+      const log = {
+        type: 'verify', itemId: it._id, orderId: order._id, userId: order.userId, name: it.name, qty, left,
+        phone: order.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
+      }
       await t.collection('order_items').doc(it._id).update({ data: { verifiedQty: (it.verifiedQty || 0) + qty, codeActive: left > 0 || !!it.refunding } })
-      return { it, order, left }
+      await t.collection('verify_logs').doc(logId).set({ data: log })
+      return { log }
     })
   } catch (e) {
     if (e.business) return u.fail(e.message)
     throw e
   }
-  const now = Date.now()
-  await db.collection('verify_logs').add({
-    data: {
-      type: 'verify', itemId: result.it._id, orderId: result.order._id, userId: result.order.userId, name: result.it.name, qty,
-      phone: result.order.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
-    }
-  })
-  await ord.refreshStatus(db, result.order._id)
-  return u.ok({ left: result.left })
+  // 扣券和記錄已完成；訂單狀態是推算出來的，這裡失敗不影響結果（打開訂單時會重新計算）
+  if (!result.repeat) await ord.refreshStatus(db, result.log.orderId).catch(e => console.error('verify refreshStatus', e))
+  return u.ok({ left: result.log.left, qty: result.log.qty, repeat: !!result.repeat })
 }
 
 async function verifyLogs(day) {
@@ -106,35 +119,43 @@ async function verifyLogs(day) {
   })
 }
 
+// 撤銷核銷：撤銷動作和「撤銷記錄」在同一個事務裡寫入（澄清 I1）；
+// 撤銷記錄的編號固定為 U + 原記錄編號，重試時認出已撤銷過，直接返回成功
 async function verifyUndo(user, logId) {
   const today = u.dateStr(Date.now())
+  logId = String(logId || '')
+  const undoId = `U${logId}`
   let result
   try {
     result = await ord.tx(db, async t => {
-      const log = await ord.tget(t, 'verify_logs', String(logId || ''))
-      if (!log || log.type !== 'verify' || log.undone) return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
+      const log = await ord.tget(t, 'verify_logs', logId)
+      if (!log || log.type !== 'verify') return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
+      if (log.undone) {
+        if (await ord.tget(t, 'verify_logs', undoId)) return { repeat: true, log }
+        return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
+      }
       if (log.day !== today) return ord.rollbackWith(t, 'BAD', '只能撤销当天的核销记录')
       const it = await ord.tget(t, 'order_items', log.itemId)
       if (!it) return ord.rollbackWith(t, 'BAD', '该记录不能撤销')
       const order = await ord.tget(t, 'orders', it.orderId)
       const paid = order && ['active', 'completed'].includes(order.status)
       const stillValid = paid && !ord.productExpired(it, Date.now())
+      const now = Date.now()
       await t.collection('order_items').doc(log.itemId).update({ data: { verifiedQty: Math.max(0, (it.verifiedQty || 0) - log.qty), codeActive: stillValid } })
-      await t.collection('verify_logs').doc(log._id).update({ data: { undone: true, undoneBy: user._id, undoneAt: Date.now() } })
+      await t.collection('verify_logs').doc(log._id).update({ data: { undone: true, undoneBy: user._id, undoneAt: now } })
+      await t.collection('verify_logs').doc(undoId).set({
+        data: {
+          type: 'undo', itemId: log.itemId, orderId: log.orderId, userId: log.userId || '', name: log.name, qty: log.qty,
+          phone: log.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
+        }
+      })
       return { log }
     })
   } catch (e) {
     if (e.business) return u.fail(e.message)
     throw e
   }
-  const now = Date.now()
-  await db.collection('verify_logs').add({
-    data: {
-      type: 'undo', itemId: result.log.itemId, orderId: result.log.orderId, userId: result.log.userId || '', name: result.log.name, qty: result.log.qty,
-      phone: result.log.phone, operatorId: user._id, operatorName: displayName(user), at: now, day: u.dateStr(now), undone: false
-    }
-  })
-  await ord.refreshStatus(db, result.log.orderId)
+  if (!result.repeat) await ord.refreshStatus(db, result.log.orderId).catch(e => console.error('undo refreshStatus', e))
   return u.ok(true)
 }
 
@@ -151,10 +172,14 @@ async function adminOrders({ keyword, date, tab, skip }) {
   if (tab === 'completed') where.status = 'completed'
   if (tab === 'refund') where.refundedFee = _.gt(0)
   const res = await db.collection('orders').where(where).orderBy('createdAt', 'desc').skip(skip || 0).limit(20).get()
+  const ids = res.data.filter(o => o.status === 'active' || o.status === 'completed').map(o => o._id)
+  const refunding = new Set(ids.length
+    ? (await db.collection('refunds').where({ orderId: _.in(ids), status: _.in(['pending', 'unknown']), kind: _.neq('timeout') }).limit(100).get()).data.map(r => r.orderId)
+    : [])
   return u.ok({
     list: res.data.map(o => ({
       _id: o._id, created: `${u.dateStr(o.createdAt).slice(5)} ${hm(o.createdAt)}`, summary: o.summary, lines: o.lines || u.legacyLines(o.summary),
-      totalFee: o.totalFee, statusText: statusText(o), phone: o.deletedUser || o.phonePurged ? '已注销用户' : u.maskPhone(o.phone)
+      totalFee: o.totalFee, statusText: statusText(o, refunding.has(o._id)), phone: o.deletedUser || o.phonePurged ? '已注销用户' : u.maskPhone(o.phone)
     })),
     more: res.data.length === 20
   })
@@ -165,17 +190,18 @@ function adminItemView(order, it, now) {
   const paidish = ['active', 'completed'].includes(order.status)
   if (it.kind === 'court') {
     v.title = `${u.cnDate(it.date)} ${u.hourRange(it.hour)} ${it.court}号场`
-    v.state = ord.courtFullyRefunded(it) ? '已退款' : it.startAt + u.HOUR <= now ? '已使用' : it.startAt <= now ? '进行中' : '待使用'
+    v.state = ord.courtFullyRefunded(it) ? '已退款' : it.refunding ? '退款中' : it.startAt + u.HOUR <= now ? '已使用' : it.startAt <= now ? '进行中' : '待使用'
     if (v.refundedFee > 0 && !ord.courtFullyRefunded(it)) v.state += ` · 已退 ${u.formatFen(v.refundedFee)}`
   } else {
     v.title = `${it.name} ×${it.qty}`
     v.available = ord.productAvailable(it)
     const parts = []
     if (v.available > 0) parts.push(`未使用 ${v.available}`)
+    if (it.refunding && it.refundingQty) parts.push(`退款中 ${it.refundingQty}`)
     if (it.verifiedQty) parts.push(`已核销 ${it.verifiedQty}`)
     if (it.refundedQty) parts.push(`已退款 ${it.refundedQty}`)
     if (it.expiredQty) parts.push(`已过期 ${it.expiredQty}`)
-    v.state = parts.join(' · ')
+    v.state = parts.join(' · ') || (it.refunding ? '退款中' : '')
   }
   // 管理端退款不受開場前 15 分鐘限制
   v.canRefund = paidish && v.refundable > 0 && !it.refunding
@@ -198,7 +224,7 @@ async function adminOrderDetail(orderId) {
   const left = ord.MAX_REFUNDS - (order.refundCount || 0)
   return u.ok({
     order: {
-      _id: order._id, statusText: statusText(order), totalFee: order.totalFee, refundedFee: order.refundedFee || 0,
+      _id: order._id, statusText: statusText(order, items.some(it => it.refunding)), totalFee: order.totalFee, refundedFee: order.refundedFee || 0,
       created: `${u.dateStr(order.createdAt)} ${hm(order.createdAt)}`,
       phone: order.deletedUser || order.phonePurged ? '已注销用户' : u.maskPhone(order.phone), hasPhone: !!order.phone && !order.deletedUser,
       refundWarn: (order.refundCount || 0) >= 45 ? `此订单剩余退款次数 ${left} 次，请合并退款` : ''
@@ -749,7 +775,7 @@ exports.main = async event => {
       case 'verifyLookup':
         return await verifyLookup(event.code)
       case 'verifyConfirm':
-        return await verifyConfirm(user, event.itemId, event.qty)
+        return await verifyConfirm(user, event.itemId, event.qty, event.reqId)
       case 'verifyLogs':
         return await verifyLogs(event.day)
       case 'verifyUndo':

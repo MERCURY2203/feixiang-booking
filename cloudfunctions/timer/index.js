@@ -66,6 +66,8 @@ async function retryRefunds(now) {
   for (const r of list) {
     if (!timeLeft()) break
     try {
+      // 處理之前先排好下次重試時間：不論後面哪一步出錯，這筆都會往後排，不會一直佔住前 20 個名額（澄清 I3）
+      await db.collection('refunds').doc(r._id).update({ data: { nextRetryAt: now + Math.min(10, 2 ** (r.attempts || 0)) * 60 * 1000 } })
       await ord.processRefund(cloud, db, r._id)
     } catch (e) {
       console.error('retryRefund', r._id, e)

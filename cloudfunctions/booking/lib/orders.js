@@ -559,14 +559,28 @@ async function processRefund(cloud, db, outRefundNo) {
     return { status: 'processing', refund: r }
   }
 
-  const f = await finalizeRefund(db, outRefundNo)
+  // 微信已受理；本地記帳失敗時同樣標為「結果不明」並排下次重試，
+  // 用原單號重試（微信不會重複退錢、記帳本身也只會做一次），絕不當成退款失敗（澄清 I3）
+  let f
+  try {
+    f = await finalizeRefund(db, outRefundNo)
+  } catch (e) {
+    const cur = await markUnknown(db, outRefundNo, new Error(`微信已受理，本地记账失败：${(e && e.message) || e}`)).catch(() => null)
+    console.error('refund finalize', outRefundNo, e)
+    if (cur && (cur.status === 'success' || cur.status === 'failed')) return { status: cur.status, refund: cur }
+    return { status: 'processing', refund: r }
+  }
   if (f.changed) {
-    if (r.kind === 'timeout') {
-      await notify(db, 'refund', `【超时付款自动退款】${u.formatFen(r.amount)}\n订单号：${order._id}`, order._id)
-      await sendTimeoutRefundMsg(cloud, order)
-    } else {
-      const who = r.by === 'customer' ? '客人自行退款' : r.by === 'system' ? '系统自动退款' : '管理端退款'
-      await notify(db, 'refund', `【${who}】${u.formatFen(r.amount)}${r.reason ? `（${r.reason}）` : ''}\n客人：${u.maskPhone(order.phone)}\n订单号：${order._id}`, order._id)
+    try {
+      if (r.kind === 'timeout') {
+        await notify(db, 'refund', `【超时付款自动退款】${u.formatFen(r.amount)}\n订单号：${order._id}`, order._id)
+        await sendTimeoutRefundMsg(cloud, order)
+      } else {
+        const who = r.by === 'customer' ? '客人自行退款' : r.by === 'system' ? '系统自动退款' : '管理端退款'
+        await notify(db, 'refund', `【${who}】${u.formatFen(r.amount)}${r.reason ? `（${r.reason}）` : ''}\n客人：${u.maskPhone(order.phone)}\n订单号：${order._id}`, order._id)
+      }
+    } catch (e) {
+      console.error('refund notify', outRefundNo, e) // 退款和記帳都已完成，通知失敗不影響結果
     }
   }
   return { status: 'success', refund: r, order: f.order }
