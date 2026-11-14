@@ -1,1 +1,1 @@
-{ "navigationBarTitleText": "编辑商品" }
+{ "navigationBarTitleText": "编辑商品", "usingComponents": { "time-picker": "/components/time-picker/index" } }

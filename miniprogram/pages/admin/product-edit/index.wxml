@@ -32,9 +32,9 @@
         <view class="field picker">{{activityDate || '选择日期'}}</view>
       </picker>
       <view class="label">开始时间</view>
-      <picker mode="time" value="{{activityStartTime}}" data-field="activityStartTime" bindchange="input">
+      <time-picker value="{{activityStartTime}}" data-field="activityStartTime" bindchange="input">
         <view class="field picker">{{activityStartTime || '选择时间'}}</view>
-      </picker>
+      </time-picker>
       <view class="muted">客人可退款至开始前 15 分钟；活动当天 23:59 后未使用的自动全额退款</view>
     </block>
     <view wx:else class="muted">长期有效，不会过期</view>

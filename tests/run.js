@@ -1514,6 +1514,34 @@ test('L1d 未同意協議時下單：先彈同意畫面，不同意就不建立�
   assert.strictEqual(calls, 0)
 })
 
+test('L5 時間選擇 24 小時制：兩列 00–23、00–59；選 13:30 輸出 13:30；不再使用 mode="time"', async () => {
+  let def
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/components/time-picker/index.js'), 'utf8'), { Component: d => (def = d) })
+  const comp = { data: JSON.parse(JSON.stringify(def.data)), ...def.methods }
+  comp.setData = patch => Object.assign(comp.data, patch)
+  const events = []
+  comp.triggerEvent = (name, detail) => events.push({ name, detail })
+  const [hours, minutes] = comp.data.range
+  assert.strictEqual(hours.length, 24)
+  assert.strictEqual(hours[0], '00')
+  assert.strictEqual(hours[23], '23')
+  assert.strictEqual(minutes.length, 60)
+  assert.strictEqual(minutes[59], '59')
+  def.observers.value.call(comp, '21:05')
+  assert.deepStrictEqual([...comp.data.index], [21, 5])
+  def.observers.value.call(comp, '') // 沒有值時停在 00:00
+  assert.deepStrictEqual([...comp.data.index], [0, 0])
+  comp.onChange({ detail: { value: [13, 30] } })
+  assert.strictEqual(events[0].name, 'change')
+  assert.strictEqual(events[0].detail.value, '13:30')
+  comp.onChange({ detail: { value: [0, 0] } })
+  assert.strictEqual(events[1].detail.value, '00:00')
+  // 全項目不再使用跟隨手機設置的 picker mode="time"
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(x => (x.isDirectory() ? walk(path.join(d, x.name)) : [path.join(d, x.name)]))
+  const offenders = walk(path.join(ROOT, 'miniprogram')).filter(f => f.endsWith('.wxml') && fs.readFileSync(f, 'utf8').includes('mode="time"'))
+  assert.deepStrictEqual(offenders, [])
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

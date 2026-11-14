@@ -7,4 +7,4 @@
 .seg-item { flex: 1; text-align: center; height: 76rpx; line-height: 76rpx; color: var(--primary); }
 .seg-item.on { background: var(--primary); color: #FFFFFF; font-weight: 600; }
 .two { display: flex; gap: 16rpx; }
-.two picker { flex: 1; }
+.two picker, .two time-picker { flex: 1; }

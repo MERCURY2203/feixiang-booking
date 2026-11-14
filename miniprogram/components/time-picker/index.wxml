@@ -1,0 +1,3 @@
+<picker mode="multiSelector" range="{{range}}" value="{{index}}" disabled="{{disabled}}" bindchange="onChange">
+  <slot />
+</picker>
