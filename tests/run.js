@@ -1585,6 +1585,26 @@ test('L6c 固定日期活動開始時間不能早於現在；編輯已開始的�
   mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...prod(bj(-10 * 60e3)), _id: r._id, stockFrom: p.stock } }), /不能早于现在/)
 })
 
+test('L7 商品圖顯示框一律 4:3：編輯頁小圖、商品列表縮圖、活動頁卡片、詳情頁大圖', async () => {
+  const css = f => fs.readFileSync(path.join(ROOT, 'miniprogram', f), 'utf8')
+  const size = (text, sel) => {
+    const m = new RegExp(sel.replace('.', '\\.') + '[^{]*\\{([^}]*)\\}').exec(text)
+    assert(m, `找不到 ${sel}`)
+    const w = /width:\s*(\d+)rpx/.exec(m[1])
+    const h = /height:\s*(\d+)rpx/.exec(m[1])
+    return { w: w ? +w[1] : null, h: +h[1] }
+  }
+  const ratio = (w, h) => Math.abs(w / h - 4 / 3) < 0.01
+  const edit = size(css('pages/admin/product-edit/index.wxss'), '.img, .img-add')
+  assert(ratio(edit.w, edit.h), `編輯頁小圖 ${edit.w}×${edit.h} 不是 4:3`)
+  const thumb = size(css('pages/admin/products/index.wxss'), '.thumb')
+  assert(ratio(thumb.w, thumb.h), `商品列表縮圖 ${thumb.w}×${thumb.h} 不是 4:3`)
+  const card = size(css('pages/activity/index.wxss'), '.pimg')
+  assert(ratio(750 - 64 - 2, card.h), `活動頁卡片圖高 ${card.h} 不是 4:3`)
+  const gallery = size(css('pages/product/index.wxss'), '.gimg')
+  assert(ratio(750, gallery.h), `詳情頁大圖高 ${gallery.h} 不是 4:3`)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

@@ -1,5 +1,6 @@
 .pcard { background: #FFFFFF; border: 1rpx solid var(--border); border-radius: 20rpx; overflow: hidden; margin-bottom: 28rpx; }
-.pimg { width: 100%; height: 360rpx; display: block; background: var(--past); }
+/* 卡片內寬 684rpx（750 - 左右留白 64 - 邊框 2），按 4:3 顯示商品圖：684 × 3 ÷ 4 = 513（澄清 L7） */
+.pimg { width: 100%; height: 513rpx; display: block; background: var(--past); }
 .pname { padding: 20rpx 28rpx 0; font-size: 34rpx; font-weight: 600; }
 .pbar { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 28rpx 24rpx; }
 .pprice { font-size: 38rpx; font-weight: 600; }

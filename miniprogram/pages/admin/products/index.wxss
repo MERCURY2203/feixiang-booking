@@ -1,5 +1,6 @@
 .pc { display: flex; align-items: center; gap: 20rpx; }
-.thumb { width: 140rpx; height: 140rpx; border-radius: 12rpx; background: var(--past); flex: none; }
+/* 4:3 縮圖，商品圖完整顯示（澄清 L7） */
+.thumb { width: 160rpx; height: 120rpx; border-radius: 12rpx; background: var(--past); flex: none; }
 .info { flex: 1; min-width: 0; }
 .shelf { flex: none; padding: 10rpx 20rpx; border-radius: 30rpx; border: 1rpx solid var(--border); font-size: 26rpx; color: var(--text-2); }
 .shelf.on { border-color: var(--primary); color: var(--primary); }

@@ -5,7 +5,8 @@
 .area { width: 100%; height: 240rpx; border: 1rpx solid var(--border); border-radius: 12rpx; padding: 16rpx 20rpx; box-sizing: border-box; }
 .imgs { display: flex; flex-wrap: wrap; gap: 16rpx; }
 .img-box { position: relative; }
-.img, .img-add { width: 190rpx; height: 190rpx; border-radius: 12rpx; }
+/* 商品圖是 4:3，小圖框也用 4:3，整張完整顯示（澄清 L7） */
+.img, .img-add { width: 240rpx; height: 180rpx; border-radius: 12rpx; }
 .img-add { border: 2rpx dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 60rpx; color: var(--text-2); }
 .img-del { position: absolute; top: -12rpx; right: -12rpx; width: 44rpx; height: 44rpx; line-height: 40rpx; text-align: center; border-radius: 50%; background: var(--danger); color: #FFFFFF; }
 .seg { display: flex; border: 1rpx solid var(--primary); border-radius: 12rpx; overflow: hidden; margin-bottom: 8rpx; }
