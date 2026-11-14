@@ -4,7 +4,11 @@
 <view class="tabs-spacer"></view>
 
 <view class="container">
-  <view wx:if="{{loaded && !list.length}}" class="placeholder">暂无订单</view>
+  <view wx:if="{{needAgree}}" class="placeholder">
+    <view>同意用户协议与隐私政策后可查看订单</view>
+    <button class="btn btn-primary" style="margin-top: 24rpx" bindtap="askAgree">阅读并同意</button>
+  </view>
+  <view wx:elif="{{loaded && !list.length}}" class="placeholder">暂无订单</view>
   <block wx:for="{{list}}" wx:for-item="o" wx:for-index="index" wx:key="_id">
   <view wx:for="{{o.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="key" class="card" data-index="{{index}}" bindtap="open">
     <view class="row">
@@ -36,3 +40,4 @@
   </view>
   </block>
 </view>
+<privacy-modal id="privacy" />

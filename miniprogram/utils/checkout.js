@@ -2,6 +2,7 @@
 // 退款規則彈窗 → 授權手機號 → 訂單通知授權 → 建立訂單 → 微信付款 → 結果頁／待支付頁
 const api = require('./api')
 const cart = require('./cart')
+const privacy = require('./privacy')
 const { TPL_TIMEOUT_REFUND } = require('../config')
 
 function modal(opts) {
@@ -38,6 +39,8 @@ function afterPay(orderId, paid) {
 // items：[{ type:'court', date, court, hour } | { type:'product', productId, qty }]
 // 返回 { ok, invalid }
 async function start(page, items, { fromCart, expectTotal } = {}) {
+  // 還沒同意協議：先彈出同意畫面，不同意就不下單（澄清 L1）
+  if (!(await privacy.ensure(page))) return { ok: false }
   const hasCourt = items.some(i => i.type === 'court')
   if (hasCourt) {
     await modal({

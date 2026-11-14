@@ -37,3 +37,4 @@
   </view>
 </view>
 <phone-sheet id="phoneSheet" />
+<privacy-modal id="privacy" />

@@ -776,7 +776,7 @@ test('B4 商品頁「立即购买」遇到改價：頁面更新成新價，再�
   }
   const wx = { showModal: o => o.success({ confirm: true }), showLoading() {}, hideLoading() {}, setStorageSync() {}, redirectTo() {}, navigateTo() {}, requestPayment: o => o.fail && o.fail({ errMsg: 'cancel' }) }
   const app = { userReady: Promise.resolve(), globalData: { user: { phone: '13800001111' } } }
-  const ctxC = { module: { exports: {} }, console, wx, getApp: () => app, require: n => (n === './api' ? api : n === './cart' ? {} : { TPL_TIMEOUT_REFUND: '' }) }
+  const ctxC = { module: { exports: {} }, console, wx, getApp: () => app, require: n => (n === './api' ? api : n === './cart' ? {} : n === './privacy' ? { ensure: async () => true } : { TPL_TIMEOUT_REFUND: '' }) }
   vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/checkout.js'), 'utf8'), ctxC)
   const page = loadPage('miniprogram/pages/product/index.js', { '/api': api, '/checkout': ctxC.module.exports, '/money': { formatFen: String }, '/cart': {} }, { wx, setTimeout })
   page.id = 'p1'
@@ -1371,6 +1371,112 @@ test('initdb 在沒有資料要整理時也能順利完成（不存空記錄）�
   assert.strictEqual(r.migration.done, true)
   assert.deepStrictEqual(doc('orders', 'OLD1').itemIds, ['OLD1_1'])
   assert.strictEqual(doc('settings', 'initdb_progress'), null)
+})
+
+// ---------------- 送審前合規（2026-11-14，L1、L2）回歸測試 ----------------
+
+// 在沙盒裡載入小程序的協議彈窗元件和 utils/privacy，共用同一個假的 wx 和 app
+function loadPrivacy({ apiCall } = {}) {
+  const storage = {}
+  const toasts = []
+  const app = { globalData: { user: null, privacyDeclined: false }, refreshUser: async () => ({ _id: 'u1', phone: '' }) }
+  const wx = {
+    getStorageSync: k => storage[k],
+    setStorageSync: (k, v) => (storage[k] = v),
+    showToast: o => toasts.push(o.title),
+    navigateTo() {}
+  }
+  const api = { call: apiCall || (async () => true), toast: m => toasts.push(m) }
+  const config = { PRIVACY_VERSION: 'V1' }
+  const pctx = { module: { exports: {} }, wx, require: n => (n.endsWith('/config') ? config : {}) }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/privacy.js'), 'utf8'), pctx)
+  const privacy = pctx.module.exports
+  let def
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/components/privacy-modal/index.js'), 'utf8'), {
+    Component: d => (def = d), wx, getApp: () => app, console,
+    require: n => (n.endsWith('/api') ? api : n.endsWith('/config') ? config : privacy)
+  })
+  const events = []
+  const comp = { data: JSON.parse(JSON.stringify(def.data)), ...def.methods }
+  comp.setData = patch => Object.assign(comp.data, patch)
+  comp.triggerEvent = name => events.push(name)
+  const attach = () => def.lifetimes.attached.call(comp)
+  return { comp, attach, privacy, storage, toasts, app, events, page: { selectComponent: id => (id === '#privacy' ? comp : null) } }
+}
+
+test('L1 首次打開自動彈出；點「不同意」只關閉，照常瀏覽，本次不再自動彈出', async () => {
+  const t = loadPrivacy()
+  t.attach()
+  assert.strictEqual(t.comp.data.show, true)
+  t.comp.onDisagree()
+  assert.strictEqual(t.comp.data.show, false)
+  assert.strictEqual(t.app.globalData.privacyDeclined, true)
+  // 換到別的頁面：不再自動彈出
+  const again = loadPrivacy()
+  again.app.globalData.privacyDeclined = true
+  again.attach()
+  assert.strictEqual(again.comp.data.show, false)
+})
+
+test('L1b 需要帳號的操作才再彈出：不同意返回 false；同意後返回 true，且記下版本', async () => {
+  const t = loadPrivacy()
+  t.app.globalData.privacyDeclined = true
+  let p = t.privacy.ensure(t.page)
+  assert.strictEqual(t.comp.data.show, true)
+  t.comp.onDisagree()
+  assert.strictEqual(await p, false)
+  p = t.privacy.ensure(t.page)
+  t.comp.toggle()
+  t.comp.onAgree()
+  assert.strictEqual(await p, true)
+  assert.strictEqual(t.storage.privacyAgreedVersion, 'V1')
+  assert.strictEqual(t.privacy.agreed(), true)
+  assert.strictEqual(await t.privacy.ensure(t.page), true) // 已同意：不再彈出
+  assert(t.events.includes('agreed'))
+})
+
+test('L1c 沒勾選就按同意：不放行；伺服器記錄失敗：不算同意', async () => {
+  let fail = true
+  const t = loadPrivacy({ apiCall: async () => { if (fail) throw new Error('net'); return true } })
+  const p = t.privacy.ensure(t.page)
+  t.comp.onAgree() // 沒勾選
+  assert.strictEqual(t.comp.data.show, true)
+  t.comp.toggle()
+  t.comp.onAgree() // 伺服器失敗
+  for (let i = 0; i < 5; i++) await F.tick()
+  assert.strictEqual(t.comp.data.show, true)
+  assert.strictEqual(t.privacy.agreed(), false)
+  fail = false
+  t.comp.onAgree()
+  assert.strictEqual(await p, true)
+})
+
+test('L2 同意後不自動索取手機號（彈窗直接關閉，沒有手機號步驟）', async () => {
+  const t = loadPrivacy()
+  t.attach()
+  t.comp.toggle()
+  t.comp.onAgree()
+  for (let i = 0; i < 5; i++) await F.tick()
+  assert.strictEqual(t.comp.data.show, false)
+  assert(!('step' in t.comp.data))
+  assert(!fs.readFileSync(path.join(ROOT, 'miniprogram/components/privacy-modal/index.wxml'), 'utf8').includes('getPhoneNumber'))
+})
+
+test('L1d 未同意協議時下單：先彈同意畫面，不同意就不建立訂單', async () => {
+  const t = loadPrivacy()
+  let calls = 0
+  const api = { toast() {}, call: async () => { calls++; return {} } }
+  const ctx = {
+    module: { exports: {} }, console, wx: { showModal: o => o.success({ confirm: true }), showLoading() {}, hideLoading() {} },
+    getApp: () => ({ userReady: Promise.resolve(), globalData: { user: { phone: '1' } } }),
+    require: n => (n === './api' ? api : n === './privacy' ? t.privacy : n === './cart' ? {} : { TPL_TIMEOUT_REFUND: '' })
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/checkout.js'), 'utf8'), ctx)
+  const p = ctx.module.exports.start(t.page, [product('p1')], {})
+  t.comp.onDisagree()
+  const r = await p
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(calls, 0)
 })
 
 ;(async () => {

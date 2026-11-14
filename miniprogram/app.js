@@ -4,7 +4,8 @@ const api = require('./utils/api')
 
 App({
   globalData: {
-    user: null // { role: 'customer' | 'staff' | 'owner', ... }
+    user: null, // { role: 'customer' | 'staff' | 'owner', ... }
+    privacyDeclined: false // 本次打開時客人點了「不同意」：不再自動彈出同意畫面（澄清 L1）
   },
 
   onLaunch() {

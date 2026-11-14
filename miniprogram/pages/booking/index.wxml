@@ -15,4 +15,4 @@
 <court-grid wx:else courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" bind:celltap="onCellTap" />
 
 <cart-fab count="{{cartCount}}" />
-<privacy-modal />
+<privacy-modal id="privacy" />

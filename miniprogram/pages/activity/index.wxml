@@ -11,4 +11,4 @@
   <view class="bottom-spacer"></view>
 </view>
 <cart-fab count="{{cartCount}}" />
-<privacy-modal />
+<privacy-modal id="privacy" />

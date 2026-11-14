@@ -44,3 +44,4 @@
   <button class="btn btn-primary go" disabled="{{!total}}" bindtap="goCheckout">去结算</button>
 </view>
 <phone-sheet id="phoneSheet" />
+<privacy-modal id="privacy" />

@@ -1,5 +1,6 @@
 // 我的訂單：按狀態分頁（澄清 A1，任務 T11）；待支付卡片直接顯示倒計時和兩個按鈕
 const api = require('../../../utils/api')
+const privacy = require('../../../utils/privacy')
 const { formatFen } = require('../../../utils/money')
 const { split } = require('../../../utils/cards')
 const { now, syncServerTime, formatBeijing } = require('../../../utils/time')
@@ -22,8 +23,18 @@ Page({
   },
 
   onShow() {
+    // 還沒同意協議（例如從微信「訂單」入口直接打開）：不查訂單，顯示提示（澄清 L1）
+    if (!privacy.agreed()) {
+      this.setData({ needAgree: true, list: [], loaded: true })
+      return
+    }
+    if (this.data.needAgree) this.setData({ needAgree: false })
     this.load(true)
     this.timer = setInterval(() => this.tick(), 1000)
+  },
+
+  askAgree() {
+    privacy.ensure(this).then(ok => ok && this.onShow())
   },
 
   onHide() {

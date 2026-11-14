@@ -3,6 +3,7 @@
     <view class="icon {{status}}">{{status === 'ok' ? '✓' : status === 'fail' ? '!' : '…'}}</view>
     <view class="msg">{{message}}</view>
     <button wx:if="{{status === 'ok' || status === 'fail'}}" class="btn btn-primary" bindtap="goMe">前往「我的」</button>
+    <button wx:if="{{status === 'wait'}}" class="btn btn-primary" bindtap="askAgree">阅读并同意协议</button>
   </view>
 </view>
-<privacy-modal bind:agreed="onAgreed" />
+<privacy-modal id="privacy" bind:agreed="onAgreed" />

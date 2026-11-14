@@ -2,6 +2,7 @@
 // 第一次使用的新微信要先同意協議（同意後才建立帳號），所以先記住邀請碼，同意完成後再自動綁定；
 // 不同意就不會用掉邀請碼（澄清 K7）
 const api = require('../../utils/api')
+const privacy = require('../../utils/privacy')
 
 Page({
   data: { status: 'loading', message: '正在绑定…' },
@@ -42,6 +43,11 @@ Page({
       })
       .catch(err => this.setData({ status: 'fail', message: err.message }))
       .then(() => (this.redeeming = false))
+  },
+
+  // 不同意後又想綁定：再彈出同意畫面（澄清 L1）
+  askAgree() {
+    privacy.ensure(this)
   },
 
   goMe() {
