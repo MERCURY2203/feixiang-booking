@@ -426,21 +426,25 @@ async function productSave(user, p) {
   return u.ok({ _id: res._id })
 }
 
-// 刪除在事務裡重新確認「從未售出」（澄清 K5）：下單事務會改寫同一個商品（扣庫存、加已售），
-// 兩者互斥，不會刪掉剛賣出的商品。買過的商品只能下架，下架不影響已購券的核銷和退款
+// 刪除商品（澄清 K5、L4）：有人買過也可以刪除。已購券自帶名稱、價格、活動日期，
+// 核銷、退款、過期自動退款都不依賴商品記錄（退款時商品不在就跳過加回庫存）。
+// 刪除在事務裡做：下單事務會改寫同一個商品（扣庫存），兩者互斥——
+// 刪除先完成，同時結算的訂單整單失敗；購買先完成，刪除照常成功，剛賣出的券照常可用。
+// 商品圖片不刪，訂單裡仍可顯示
 async function productDelete(user, id) {
+  let sold = 0
   try {
     await ord.tx(db, async t => {
       const p = await ord.tget(t, 'products', String(id || ''))
       if (!p) return ord.rollbackWith(t, 'BAD', '商品不存在')
-      if ((p.soldCount || 0) > 0) return ord.rollbackWith(t, 'BAD', '已有人购买过的商品不能删除，只能下架')
+      sold = p.soldCount || 0
       await t.collection('products').doc(p._id).remove()
     })
   } catch (e) {
     if (e.business) return u.fail(e.message)
     throw e
   }
-  await audit(user, 'product_delete', { id })
+  await audit(user, 'product_delete', { id, sold })
   return u.ok(true)
 }
 

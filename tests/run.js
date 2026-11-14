@@ -1188,9 +1188,9 @@ test('F10b initdb 合併重複帳號：訂單和角色接到保留帳號，重�
   assert.deepStrictEqual(again.migration.usersMerged, [])
 })
 
-test('F4 刪除商品時剛好有人買了：刪除被拒，商品和訂單都在', async () => {
+test('F4 刪除商品時剛好有人買了（L4：買過也可刪）：刪除成功，剛賣出的訂單和券照常可用', async () => {
   store.write('products', 'p3', { ...doc('products', 'p1'), name: '新品' })
-  // 刪除事務讀到「從未售出」、還沒提交時，客人完成購買
+  // 刪除事務讀到商品、還沒提交時，客人完成購買：刪除要重來，重來時照常刪除
   const db = F.db
   const real = db.runTransaction
   let bought = null
@@ -1200,7 +1200,7 @@ test('F4 刪除商品時剛好有人買了：刪除被拒，商品和訂單都�
     if (!started) {
       started = true
       db.runTransaction = real // 客人的下單用正常事務
-      bought = await buy('oA', [product('p3')])
+      bought = await buy('oA', [product('p3', 2)])
     }
     return v
   }, ...args)
@@ -1210,9 +1210,12 @@ test('F4 刪除商品時剛好有人買了：刪除被拒，商品和訂單都�
   } finally {
     db.runTransaction = real
   }
-  assert.strictEqual(del.ok, false)
-  assert(doc('products', 'p3'))
+  assert.strictEqual(del.ok, true)
+  assert.strictEqual(doc('products', 'p3'), null)
   assert(bought && doc('orders', bought).status === 'active')
+  const it = itemsOf(bought)[0]
+  assert.strictEqual(it.codeActive, true)
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: it._id, qty: 1, reqId: 'req-del-0001' }))
 })
 
 test('F4a 刪除先完成，同時進行的下單整單失敗', async () => {
@@ -1226,6 +1229,38 @@ test('F4a 刪除先完成，同時進行的下單整單失敗', async () => {
   }
   assert.strictEqual(r.ok, false)
   assert.strictEqual(doc('slot_locks', `${D}_1_19`), null)
+})
+
+test('L4 刪除有人買過的商品：核銷、客人退款、管理端退款都照常，金額正確', async () => {
+  const id = await buy('oA', [product('p1', 4)])
+  const it = itemsOf(id)[0]
+  must(await call(admin, 'oO', { action: 'productDelete', id: 'p1' }))
+  assert.strictEqual(doc('products', 'p1'), null)
+  mustFail(await checkout('oB', [product('p1')]))
+  mustFail(await call(booking, 'oB', { action: 'product', id: 'p1' }))
+  // 已買的券
+  const look = must(await call(admin, 'oO', { action: 'verifyLookup', code: it.code }))
+  assert.strictEqual(look.available, 4)
+  must(await call(admin, 'oO', { action: 'verifyConfirm', itemId: it._id, qty: 1, reqId: 'req-l4-0001' }))
+  const d = must(await call(booking, 'oA', { action: 'orderDetail', orderId: id }))
+  assert.strictEqual(d.items[0].canRefund, true)
+  must(await call(booking, 'oA', { action: 'refund', orderId: id, itemId: it._id, qty: 1 }))
+  must(await call(admin, 'oO', { action: 'refund', orderId: id, parts: [{ itemId: it._id, qty: 1, amount: it.price }] }))
+  const after = doc('order_items', it._id)
+  assert.strictEqual(after.verifiedQty, 1)
+  assert.strictEqual(after.refundedQty, 2)
+  assert.strictEqual(wechat.refundedTotal(id), 2 * it.price)
+  assert.strictEqual(doc('orders', id).refundedFee, 2 * it.price)
+  assert.strictEqual(doc('products', 'p1'), null) // 退款不會把已刪除的商品「加回」
+})
+
+test('L4b 刪除有人買過的固定日期活動：過期照常自動退款', async () => {
+  const id = await buy('oA', [product('p2', 2)])
+  must(await call(admin, 'oO', { action: 'productDelete', id: 'p2' }))
+  clock.now = Date.UTC(2026, 10, 12, 2, 0, 0)
+  await runTimer()
+  assert.strictEqual(itemsOf(id)[0].expiredQty, 2)
+  assert.strictEqual(wechat.refundedTotal(id), 2 * 8800)
 })
 
 test('F4b 買過的商品下架後：客人看不到、不能買；已買的券照常可核銷、可退款', async () => {

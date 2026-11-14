@@ -88,11 +88,14 @@ Page({
       })
   },
 
+  // 有人買過也可以刪除（澄清 L4）：已買的券照常可用、可退款；刪除不能恢復
   remove() {
-    if (this.data.soldCount > 0) return api.toast('已有人购买过的商品不能删除，只能下架')
+    const sold = this.data.soldCount || 0
     wx.showModal({
       title: '删除商品',
-      content: '确定删除这个商品？',
+      content: sold > 0
+        ? `该商品已售出 ${sold} 件。删除后客人已买的券照常可以使用和退款，但商品无法恢复。确定删除？`
+        : '删除后无法恢复。确定删除这个商品？',
       confirmColor: '#E54545',
       success: res => {
         if (!res.confirm) return

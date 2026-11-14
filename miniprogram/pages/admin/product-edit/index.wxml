@@ -50,7 +50,7 @@
     <switch checked="{{onShelf}}" color="#2B5AAE" bindchange="toggleShelf" />
   </view>
 
-  <view wx:if="{{id}}" class="del" bindtap="remove">{{soldCount > 0 ? '已售出的商品不能删除，只能下架' : '删除商品'}}</view>
+  <view wx:if="{{id}}" class="del" bindtap="remove">删除商品</view>
   <view class="bottom-spacer"></view>
 </view>
 <view class="bottom-bar"><button class="btn btn-primary" bindtap="save">保存</button></view>
