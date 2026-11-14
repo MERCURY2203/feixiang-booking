@@ -18,7 +18,7 @@
     </block>
     <block wx:if="{{b.target.type === 'booking'}}">
       <view class="label">选择日期</view>
-      <picker mode="date" value="{{b.target.date}}" bindchange="pickBookingDate">
+      <picker mode="date" start="{{today}}" value="{{b.target.date}}" bindchange="pickBookingDate">
         <view class="field">{{b.target.date || '选择日期'}}</view>
       </picker>
     </block>
@@ -33,12 +33,12 @@
     <block wx:if="{{b.mode === 'timed'}}">
       <view class="label">开始</view>
       <view class="two">
-        <picker mode="date" value="{{b.startDate}}" data-field="startDate" bindchange="input"><view class="field">{{b.startDate || '日期'}}</view></picker>
+        <picker mode="date" start="{{today}}" value="{{b.startDate}}" data-field="startDate" bindchange="input"><view class="field">{{b.startDate || '日期'}}</view></picker>
         <time-picker value="{{b.startTime}}" data-field="startTime" bindchange="input"><view class="field">{{b.startTime}}</view></time-picker>
       </view>
       <view class="label">结束</view>
       <view class="two">
-        <picker mode="date" value="{{b.endDate}}" data-field="endDate" bindchange="input"><view class="field">{{b.endDate || '日期'}}</view></picker>
+        <picker mode="date" start="{{today}}" value="{{b.endDate}}" data-field="endDate" bindchange="input"><view class="field">{{b.endDate || '日期'}}</view></picker>
         <time-picker value="{{b.endTime}}" data-field="endTime" bindchange="input"><view class="field">{{b.endTime}}</view></time-picker>
       </view>
       <view class="muted">到时自动上架、自动下架</view>

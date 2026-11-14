@@ -1542,6 +1542,49 @@ test('L5 時間選擇 24 小時制：兩列 00–23、00–59；選 13:30 輸出
   assert.deepStrictEqual(offenders, [])
 })
 
+// 北京時間的日期和「時:分」（測試時鐘 + offset 毫秒）
+function bj(offset) {
+  const d = new Date(clock.now + offset + 8 * 3600e3)
+  const p2 = n => String(n).padStart(2, '0')
+  return { date: `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`, time: `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}` }
+}
+
+test('L6 限時橫幅不能選已過去的時間；編輯已開始的橫幅只延長結束時間可以保存', async () => {
+  const banner = (s, e) => ({ image: 'cloud://b', mode: 'timed', enabled: true, startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time })
+  // 開始時間在 1 小時前
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: banner(bj(-3600e3), bj(3600e3)) }), /开始时间不能早于现在/)
+  // 結束時間已過
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: banner(bj(-7200e3), bj(-3600e3)) }), /结束时间已过/)
+  // 開始時間就是現在這一分鐘：可以
+  must(await call(admin, 'oO', { action: 'bannerSave', banner: banner(bj(0), bj(3600e3)) }))
+  // 一張 10 分鐘後開始的橫幅，過了 1 小時（已開始），只延長結束時間：可以保存
+  must(await call(admin, 'oO', { action: 'bannerSave', banner: banner(bj(10 * 60e3), bj(2 * 3600e3)) }))
+  const saved = all('banners').find(x => x.startAt === Math.floor((clock.now + 10 * 60e3) / 60000) * 60000)
+  assert(saved)
+  clock.now += 3600e3
+  const start = bj(10 * 60e3 - 3600e3)
+  must(await call(admin, 'oO', { action: 'bannerSave', banner: { ...banner(start, bj(5 * 3600e3)), _id: saved._id } }))
+  // 但把開始時間改成另一個過去的時間：不行
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: { ...banner(bj(-30 * 60e3), bj(5 * 3600e3)), _id: saved._id } }), /开始时间不能早于现在/)
+})
+
+test('L6b 橫幅跳轉到訂場頁的日期不能早於今天', async () => {
+  const b = { image: 'cloud://b', mode: 'long', enabled: true, target: { type: 'booking', date: bj(-24 * 3600e3).date } }
+  mustFail(await call(admin, 'oO', { action: 'bannerSave', banner: b }), /不能早于今天/)
+  must(await call(admin, 'oO', { action: 'bannerSave', banner: { ...b, target: { type: 'booking', date: bj(0).date } } }))
+})
+
+test('L6c 固定日期活動開始時間不能早於現在；編輯已開始的活動不改開始時間可以保存', async () => {
+  const prod = t => ({ name: '晚场活动', price: 5000, stock: 10, images: ['cloud://p'], fixedDate: true, onShelf: true, activityDate: t.date, activityStartTime: t.time })
+  mustFail(await call(admin, 'oO', { action: 'productSave', product: prod(bj(-3600e3)) }), /不能早于现在/)
+  const r = must(await call(admin, 'oO', { action: 'productSave', product: prod(bj(30 * 60e3)) }))
+  clock.now += 3600e3 // 活動已開始
+  const p = doc('products', r._id)
+  must(await call(admin, 'oO', { action: 'productSave', product: { ...prod(bj(30 * 60e3 - 3600e3)), _id: r._id, name: '晚场活动（改名）', stockFrom: p.stock } }))
+  assert.strictEqual(doc('products', r._id).name, '晚场活动（改名）')
+  mustFail(await call(admin, 'oO', { action: 'productSave', product: { ...prod(bj(-10 * 60e3)), _id: r._id, stockFrom: p.stock } }), /不能早于现在/)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

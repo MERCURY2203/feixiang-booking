@@ -1,6 +1,7 @@
 // 新增／編輯橫幅：圖片、跳轉目標（從清單點選）、顯示方式（長期／限時）
 const api = require('../../../utils/api')
 const { pickImages } = require('../../../utils/image')
+const { now, beijingParts, pad } = require('../../../utils/time')
 
 const TARGETS = [
   { type: 'none', name: '不跳转' },
@@ -11,11 +12,14 @@ const TARGETS = [
 
 Page({
   data: {
-    targets: TARGETS, targetIndex: 0, products: [], productIndex: -1,
+    targets: TARGETS, targetIndex: 0, products: [], productIndex: -1, today: '',
     b: { _id: '', image: '', enabled: true, mode: 'long', target: { type: 'none' }, startDate: '', startTime: '00:00', endDate: '', endTime: '23:59' }
   },
 
   onLoad(options) {
+    // 日曆從今天（北京時間）開始，過去的日子選不到（澄清 L6）
+    const p = beijingParts(now())
+    this.setData({ today: `${p.year}-${pad(p.month)}-${pad(p.day)}` })
     let b = this.data.b
     if (options.edit) {
       const saved = wx.getStorageSync('editingBanner')

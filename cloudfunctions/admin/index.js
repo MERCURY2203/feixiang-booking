@@ -391,6 +391,11 @@ async function productSave(user, p) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(p.activityDate || '') || !t) return u.fail('固定日期活动需填写活动日期和开始时间')
     data.activityDate = p.activityDate
     data.activityStartAt = u.dayStart(p.activityDate) + t.h * u.HOUR + t.mi * 60000
+    // 活動開始時間不能早於現在（澄清 L6）；編輯已開始的活動、沒改開始時間的可以保存
+    if (data.activityStartAt < minuteNow()) {
+      const old = p._id ? await ord.dget(db, 'products', String(p._id)) : null
+      if (!old || !old.fixedDate || old.activityStartAt !== data.activityStartAt) return u.fail('活动开始时间不能早于现在')
+    }
   } else {
     data.activityDate = ''
     data.activityStartAt = 0
@@ -502,12 +507,19 @@ async function bannerList() {
   }))
 }
 
+// 「現在」所在那一分鐘的開始：時間精確到分鐘，同一分鐘內選的時間算現在（澄清 L6）
+function minuteNow() {
+  return Math.floor(Date.now() / 60000) * 60000
+}
+
 async function bannerSave(user, b) {
   if (!b.image || !String(b.image).startsWith('cloud://')) return u.fail('请上传横幅图片')
+  const old = b._id ? await ord.dget(db, 'banners', String(b._id)) : null
   const data = { image: b.image, enabled: b.enabled !== false, mode: b.mode === 'timed' ? 'timed' : 'long', updatedAt: Date.now() }
   const tt = b.target || {}
   data.target = tt.type === 'product' ? { type: 'product', productId: tt.productId } : tt.type === 'activity' ? { type: 'activity' } : tt.type === 'booking' ? { type: 'booking', date: tt.date || '' } : { type: 'none' }
   if (data.target.type === 'product' && !data.target.productId) return u.fail('请选择跳转的商品')
+  if (data.target.type === 'booking' && data.target.date && data.target.date < u.dateStr(Date.now())) return u.fail('跳转的订场日期不能早于今天')
   if (data.mode === 'timed') {
     const s = parseHm(b.startTime)
     const e = parseHm(b.endTime)
@@ -515,6 +527,10 @@ async function bannerSave(user, b) {
     data.startAt = u.dayStart(b.startDate) + s.h * u.HOUR + s.mi * 60000
     data.endAt = u.dayStart(b.endDate) + e.h * u.HOUR + e.mi * 60000
     if (data.endAt <= data.startAt) return u.fail('结束时间要晚于开始时间')
+    // 不能選已經過去的時間（澄清 L6）；編輯已開始的橫幅、沒改開始時間的可以保存
+    if (data.endAt <= Date.now()) return u.fail('结束时间已过，请重新选择')
+    const keepStart = old && old.mode === 'timed' && old.startAt === data.startAt
+    if (data.startAt < minuteNow() && !keepStart) return u.fail('开始时间不能早于现在')
   } else {
     data.startAt = 0
     data.endAt = 0
