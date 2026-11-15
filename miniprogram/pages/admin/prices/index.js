@@ -11,7 +11,8 @@ function today() {
 
 Page({
   data: {
-    tab: 'regular', today: '', cfg: null, form: { weekday: '', weekend: '', mode: 'now', from: '' },
+    tab: 'regular', today: '', cfg: null, form: { weekday: '', weekend: '', mode: 'now', from: '', slots: [] },
+    hourOptions: Array.from({ length: 25 }, (_, h) => `${pad(h)}:00`),
     showExpired: false, preview: null, previewDate: ''
   },
 
@@ -25,15 +26,17 @@ Page({
       .call('admin', 'priceConfig')
       .then(cfg => {
         const view = r => ({ ...r, priceText: formatFen(r.price) })
+        const slotView = s => ({ ...s, text: `${pad(s.startHour)}:00–${pad(s.endHour)}:00`, weekdayText: formatFen(s.weekday), weekendText: formatFen(s.weekend) })
         this.setData({
           cfg: {
-            regular: { ...cfg.regular, weekdayText: formatFen(cfg.regular.weekday), weekendText: formatFen(cfg.regular.weekend) },
-            scheduled: cfg.scheduled.map(s => ({ ...s, weekdayText: formatFen(s.weekday), weekendText: formatFen(s.weekend) })),
+            regular: { ...cfg.regular, weekdayText: formatFen(cfg.regular.weekday), weekendText: formatFen(cfg.regular.weekend), slots: cfg.regular.slots.map(slotView) },
+            scheduled: cfg.scheduled.map(s => ({ ...s, weekdayText: formatFen(s.weekday), weekendText: formatFen(s.weekend), slots: s.slots.map(slotView) })),
             daily: cfg.daily.map(view),
             expired: cfg.expired.map(view)
           },
           'form.weekday': (cfg.regular.weekday / 100).toFixed(2),
-          'form.weekend': (cfg.regular.weekend / 100).toFixed(2)
+          'form.weekend': (cfg.regular.weekend / 100).toFixed(2),
+          'form.slots': cfg.regular.slots.map(s => ({ start: s.startHour, end: s.endHour, weekday: (s.weekday / 100).toFixed(2), weekend: (s.weekend / 100).toFixed(2) }))
         })
       })
       .catch(err => api.toast(err.message))
@@ -51,14 +54,46 @@ Page({
     this.setData({ 'form.mode': e.currentTarget.dataset.mode })
   },
 
+  addSlot() {
+    const slots = this.data.form.slots.slice()
+    const last = slots[slots.length - 1]
+    const start = last ? Math.min(last.end, 23) : 9
+    slots.push({ start, end: Math.min(start + 1, 24), weekday: this.data.form.weekday, weekend: this.data.form.weekend })
+    this.setData({ 'form.slots': slots })
+  },
+
+  removeSlot(e) {
+    const slots = this.data.form.slots.slice()
+    slots.splice(e.currentTarget.dataset.index, 1)
+    this.setData({ 'form.slots': slots })
+  },
+
+  slotInput(e) {
+    const { index, field } = e.currentTarget.dataset
+    this.setData({ [`form.slots[${index}].${field}`]: e.detail.value })
+  },
+
+  slotPick(e) {
+    const { index, field } = e.currentTarget.dataset
+    this.setData({ [`form.slots[${index}].${field}`]: Number(e.detail.value) })
+  },
+
   saveRegular() {
     const f = this.data.form
     const weekday = yuanToFen(f.weekday)
     const weekend = yuanToFen(f.weekend)
     if (!weekday || !weekend) return api.toast('请填写正确的价格（最多两位小数）')
     if (f.mode === 'date' && !f.from) return api.toast('请选择生效日期')
+    const slots = []
+    for (const s of f.slots) {
+      const wd = yuanToFen(s.weekday)
+      const we = yuanToFen(s.weekend)
+      if (!(s.start < s.end)) return api.toast('时段的开始时间要早于结束时间')
+      if (!wd || !we) return api.toast('请填写每个时段的平日价和周末价')
+      slots.push({ startHour: s.start, endHour: s.end, weekday: wd, weekend: we })
+    }
     api
-      .call('admin', 'saveRegular', { weekday, weekend, effectiveFrom: f.mode === 'date' ? f.from : '' })
+      .call('admin', 'saveRegular', { weekday, weekend, slots, effectiveFrom: f.mode === 'date' ? f.from : '' })
       .then(() => {
         wx.showToast({ title: '已保存', icon: 'none' })
         this.load()

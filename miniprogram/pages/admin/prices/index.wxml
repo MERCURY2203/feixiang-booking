@@ -19,10 +19,18 @@
       <view class="card-title">当前常用价格</view>
       <view class="row line"><text>平日（周一至周五）</text><text class="strong">{{cfg.regular.weekdayText}}/小时</text></view>
       <view class="row line"><text>周末（周六日）</text><text class="strong">{{cfg.regular.weekendText}}/小时</text></view>
+      <block wx:if="{{cfg.regular.slots.length}}">
+        <view class="muted slot-head">分时段价格（没写到的时段用上面的价格）</view>
+        <view wx:for="{{cfg.regular.slots}}" wx:key="startHour" class="line slot-line">
+          <view class="muted">{{item.text}}</view>
+          <view class="row"><text>平日 {{item.weekdayText}}</text><text>周末 {{item.weekendText}}</text></view>
+        </view>
+      </block>
     </view>
     <view wx:for="{{cfg.scheduled}}" wx:key="_id" class="card">
       <view class="muted">{{item.effectiveFrom}} 起生效</view>
       <view>平日 {{item.weekdayText}} ／ 周末 {{item.weekendText}}</view>
+      <view wx:for="{{item.slots}}" wx:for-item="s" wx:key="startHour" class="muted">{{s.text}}：平日 {{s.weekdayText}} ／ 周末 {{s.weekendText}}</view>
     </view>
     <view class="card">
       <view class="card-title">修改常用价格</view>
@@ -30,6 +38,20 @@
       <input class="field" type="digit" value="{{form.weekday}}" data-field="weekday" bindinput="input" />
       <view class="label">周末价格（元/小时）</view>
       <input class="field" type="digit" value="{{form.weekend}}" data-field="weekend" bindinput="input" />
+      <view class="label">分时段价格（可不填；没写到的时段用上面的价格）</view>
+      <view wx:for="{{form.slots}}" wx:key="index" class="slot-box">
+        <view class="slot-time">
+          <picker range="{{hourOptions}}" value="{{item.start}}" data-index="{{index}}" data-field="start" bindchange="slotPick"><view class="field slot-pick">{{hourOptions[item.start]}}</view></picker>
+          <text class="slot-to">至</text>
+          <picker range="{{hourOptions}}" value="{{item.end}}" data-index="{{index}}" data-field="end" bindchange="slotPick"><view class="field slot-pick">{{hourOptions[item.end]}}</view></picker>
+          <text class="danger slot-del" data-index="{{index}}" bindtap="removeSlot">删除</text>
+        </view>
+        <view class="slot-price">
+          <view class="slot-col"><view class="label">平日（元/小时）</view><input class="field" type="digit" value="{{item.weekday}}" data-index="{{index}}" data-field="weekday" bindinput="slotInput" /></view>
+          <view class="slot-col"><view class="label">周末（元/小时）</view><input class="field" type="digit" value="{{item.weekend}}" data-index="{{index}}" data-field="weekend" bindinput="slotInput" /></view>
+        </view>
+      </view>
+      <view class="add-slot" bindtap="addSlot">+ 添加时段</view>
       <view class="label">生效时间</view>
       <view class="seg">
         <view class="seg-item {{form.mode === 'now' ? 'on' : ''}}" data-mode="now" bindtap="setMode">立即生效</view>

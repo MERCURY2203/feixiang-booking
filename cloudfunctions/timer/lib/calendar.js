@@ -63,13 +63,16 @@ function dailyRuleFor(cfg, date, court, hour) {
   )
 }
 
-// 單日價格 ＞ 常用價格
+// 單日價格 ＞ 常用價格（時段價 ＞ 預設平日／周末價）
 function priceFor(cfg, date, court, hour) {
   const rule = dailyRuleFor(cfg, date, court, hour)
   if (rule) return { price: rule.price, special: true }
   const reg = regularFor(cfg, date)
   const wd = u.weekday(date)
-  return { price: wd === 0 || wd === 6 ? reg.weekend : reg.weekday, special: false }
+  // 常用價格可以再分時段：命中時段用時段價，其餘小時用預設的平日價／周末價
+  const slot = (reg.slots || []).find(s => hour >= s.startHour && hour < s.endHour)
+  const src = slot || reg
+  return { price: wd === 0 || wd === 6 ? src.weekend : src.weekday, special: false }
 }
 
 module.exports = { loadConfig, hoursFor, bookableDays, priceFor, regularFor, getAll, DEFAULT_HOURS, DEFAULT_PRICE }

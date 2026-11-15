@@ -581,17 +581,36 @@ async function priceConfig() {
     return { _id: r._id, dates, startHour: r.startHour, endHour: r.endHour, courts: r.courts, price: r.price, dateText, timeText: `${u.pad(r.startHour)}:00–${u.pad(r.endHour)}:00`, courtText: courts }
   }
   return u.ok({
-    regular: { weekday: current.weekday, weekend: current.weekend, effectiveFrom: current.effectiveFrom || '' },
-    scheduled: scheduled.map(r => ({ _id: r._id, weekday: r.weekday, weekend: r.weekend, effectiveFrom: r.effectiveFrom })),
+    regular: { weekday: current.weekday, weekend: current.weekend, slots: current.slots || [], effectiveFrom: current.effectiveFrom || '' },
+    scheduled: scheduled.map(r => ({ _id: r._id, weekday: r.weekday, weekend: r.weekend, slots: r.slots || [], effectiveFrom: r.effectiveFrom })),
     daily: all.filter(r => r.lastDate >= today).sort((a, b) => (a.dates[0] < b.dates[0] ? -1 : 1)).map(view),
     expired: all.filter(r => r.lastDate < today).sort((a, b) => (a.lastDate > b.lastDate ? -1 : 1)).slice(0, 50).map(view)
   })
 }
 
-async function saveRegular(user, { weekday, weekend, effectiveFrom }) {
+async function saveRegular(user, { weekday, weekend, effectiveFrom, slots }) {
   weekday = Math.round(weekday)
   weekend = Math.round(weekend)
   if (!(weekday > 0 && weekend > 0)) return u.fail('请填写正确的价格')
+  // 分时段价格：每段「开始—结束」整点，平日价和周末价；时段之间不能重叠
+  const list = []
+  for (const s of Array.isArray(slots) ? slots : []) {
+    const startHour = Math.floor(s.startHour)
+    const endHour = Math.floor(s.endHour)
+    const wd = Math.round(s.weekday)
+    const we = Math.round(s.weekend)
+    if (!(startHour >= 0 && endHour <= 24 && startHour < endHour)) return u.fail('时段的开始时间要早于结束时间')
+    if (!(wd > 0 && we > 0)) return u.fail('请填写每个时段的平日价和周末价')
+    list.push({ startHour, endHour, weekday: wd, weekend: we })
+  }
+  if (list.length > 24) return u.fail('时段最多 24 段')
+  list.sort((x, y) => x.startHour - y.startHour)
+  for (let i = 1; i < list.length; i++) {
+    if (list[i].startHour < list[i - 1].endHour) {
+      return u.fail(`${u.pad(list[i - 1].startHour)}:00–${u.pad(list[i - 1].endHour)}:00 和 ${u.pad(list[i].startHour)}:00–${u.pad(list[i].endHour)}:00 的时段重叠了`)
+    }
+  }
+  slots = list
   const today = u.dateStr(Date.now())
   const from = effectiveFrom && effectiveFrom > today ? effectiveFrom : today
   let id
@@ -600,10 +619,10 @@ async function saveRegular(user, { weekday, weekend, effectiveFrom }) {
     id = same.data.length ? same.data[0]._id : ''
     return null
   }, t => (id
-    ? t.collection('prices').doc(id).update({ data: { weekday, weekend, updatedAt: Date.now() } })
-    : t.collection('prices').doc(u.newId('PR')).set({ data: { type: 'regular', weekday, weekend, effectiveFrom: from, createdAt: Date.now() } })))
+    ? t.collection('prices').doc(id).update({ data: { weekday, weekend, slots, updatedAt: Date.now() } })
+    : t.collection('prices').doc(u.newId('PR')).set({ data: { type: 'regular', weekday, weekend, slots, effectiveFrom: from, createdAt: Date.now() } })))
   if (bad) return bad
-  await audit(user, 'price_regular', { weekday, weekend, from })
+  await audit(user, 'price_regular', { weekday, weekend, slots, from })
   return u.ok(true)
 }
 

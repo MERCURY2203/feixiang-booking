@@ -15,3 +15,15 @@
 .danger { color: var(--danger); }
 .expired-toggle { text-align: center; color: var(--text-2); padding: 20rpx 0; }
 .expired { opacity: 0.6; }
+
+.slot-head { margin-top: 16rpx; }
+.slot-line { border-top: 1rpx solid var(--border); }
+.slot-box { border: 1rpx solid var(--border); border-radius: 12rpx; padding: 16rpx 20rpx 20rpx; margin-bottom: 16rpx; background: #F7F9FD; }
+.slot-time { display: flex; align-items: center; gap: 12rpx; }
+.slot-pick { width: 180rpx; text-align: center; padding: 0; background: #FFFFFF; }
+.slot-to { color: var(--text-2); }
+.slot-del { margin-left: auto; }
+.slot-price { display: flex; gap: 20rpx; }
+.slot-col { flex: 1; }
+.slot-col .field { background: #FFFFFF; }
+.add-slot { height: 80rpx; line-height: 80rpx; text-align: center; border: 2rpx dashed var(--primary); border-radius: 12rpx; color: var(--primary); margin-top: 8rpx; }

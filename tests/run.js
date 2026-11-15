@@ -1605,6 +1605,38 @@ test('L7 商品圖顯示框一律 4:3：編輯頁小圖、商品列表縮圖、�
   assert(ratio(750, gallery.h), `詳情頁大圖高 ${gallery.h} 不是 4:3`)
 })
 
+test('C7 常用價格分時段：時段價優先於預設價，單日價格仍最優先；時段重疊不能保存', async () => {
+  // D = 2026-11-11 是周三（平日）；預設平日 ¥65，9–17 點 ¥50，17–23 點 ¥80
+  must(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000, slots: [
+    { startHour: 9, endHour: 17, weekday: 5000, weekend: 7000 },
+    { startHour: 17, endHour: 23, weekday: 8000, weekend: 12000 }
+  ] }))
+  const priceAt = async (date, hour, court = 1) => {
+    const r = must(await call(booking, 'oA', { action: 'schedule', date }))
+    const row = r.hours.findIndex(h => h.hour === hour)
+    return r.cells[row][r.courts.indexOf(court)].p
+  }
+  assert.strictEqual(await priceAt(D, 9), 5000)
+  assert.strictEqual(await priceAt(D, 16), 5000)
+  assert.strictEqual(await priceAt(D, 17), 8000)
+  assert.strictEqual(await priceAt('2026-11-14', 10), 7000) // 周六用周末價
+  // 單日價格最優先
+  must(await call(admin, 'oO', { action: 'saveDaily', rule: { dates: [D], startHour: 17, endHour: 18, courts: [1], price: 12000 } }))
+  assert.strictEqual(await priceAt(D, 17), 12000)
+  assert.strictEqual(await priceAt(D, 17, 2), 8000)
+  // 沒寫到的時段用預設價
+  must(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000, slots: [{ startHour: 9, endHour: 12, weekday: 5000, weekend: 7000 }] }))
+  assert.strictEqual(await priceAt(D, 13, 3), 6500)
+  // 重疊、時間顛倒、沒填價格都不能保存
+  mustFail(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000, slots: [
+    { startHour: 9, endHour: 13, weekday: 5000, weekend: 7000 }, { startHour: 12, endHour: 15, weekday: 5000, weekend: 7000 }] }), /重叠/)
+  mustFail(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000, slots: [{ startHour: 15, endHour: 12, weekday: 5000, weekend: 7000 }] }), /开始时间/)
+  mustFail(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000, slots: [{ startHour: 9, endHour: 12, weekday: 0, weekend: 7000 }] }), /平日价和周末价/)
+  // 沒有 slots 的舊資料照舊
+  must(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000 }))
+  assert.strictEqual(await priceAt(D, 9, 5), 6500)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {
