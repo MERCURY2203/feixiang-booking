@@ -5,6 +5,7 @@
 //    - 核銷記錄補上客人 userId（刪除手機號時要用）
 //    - 所有券碼登記到 coupon_codes；如有重複券碼，給較新的那張卡片換新碼
 //    - 合併重複帳號（同一 OpenID 多個帳號，澄清 K4）：只合併、不刪除
+//    - 已取消的球局還有已付款沒退的卡片：重新標上「退款未完成」，由定時任務補退（澄清 O4）
 // 3. 進度存在 settings/initdb_progress，超時後再執行會從上次的位置繼續（澄清 K12）
 // 執行前把本函數「超時時間」設為 60 秒；返回結果裡 done 為 false 時再執行一次，直到 done 為 true
 const cloud = require('wx-server-sdk')
@@ -103,7 +104,7 @@ async function mergeUser(u, report) {
 }
 
 async function migrate(deadline) {
-  const report = { ordersFixed: 0, ordersWithoutItems: [], logsFixed: 0, codesRegistered: 0, codesChanged: [], usersMerged: [] }
+  const report = { ordersFixed: 0, ordersWithoutItems: [], logsFixed: 0, codesRegistered: 0, codesChanged: [], usersMerged: [], gamesRefundReopened: [] }
   const progress = (await getDoc('settings', 'initdb_progress')) || {}
   delete progress._id
 
@@ -148,7 +149,15 @@ async function migrate(deadline) {
 
   const d = progress.users === 'DONE' || await scan(progress, 'users', 'users', { openid: _.exists(true) }, deadline, async x => mergeUser(x, report))
 
-  const done = a && b && c && d
+  // 已取消的球局還有已付款沒退的卡片（舊版本可能誤標為已使用）：重新標上「退款未完成」，定時任務會補退（澄清 O4）
+  const e = progress.games === 'DONE' || await scan(progress, 'games', 'games', { status: 'cancelled', refundPending: _.neq(true) }, deadline, async g => {
+    const left = await db.collection('order_items').where({ gameId: g._id, kind: 'game', status: _.in(['active', 'used']) }).count()
+    if (!left.total) return
+    await db.collection('games').doc(g._id).update({ data: { refundPending: true } })
+    report.gamesRefundReopened.push(g._id)
+  })
+
+  const done = a && b && c && d && e
   // 全部完成才清除進度，下次執行（例如之後更新程式）從頭再檢查一次
   if (done) await db.collection('settings').doc('initdb_progress').remove().catch(() => {})
   return { done, ...report }

@@ -21,10 +21,13 @@ async function refundGameItem(cloud, db, it, by, operatorId) {
   })
 }
 
+// 已付款、還沒退完的卡片狀態：待使用 active；已使用 used 只在取消的球局裡出現（舊版本可能誤標，澄清 O4）
+const PAID = ['active', 'used']
+
 // 給一批卡片記上 gameOut（只記已付款、還沒退完、沒記過的）
 async function markOut(db, where, reason) {
   const _ = db.command
-  await db.collection('order_items').where({ ...where, kind: 'game', status: 'active', gameOut: _.exists(false) }).update({ data: { gameOut: reason } })
+  await db.collection('order_items').where({ ...where, kind: 'game', status: _.in(PAID), gameOut: _.exists(false) }).update({ data: { gameOut: reason } })
 }
 
 // 取消球局：事務裡改狀態並放回格子；之後所有已付款的報名記 cancelled 並退款
@@ -58,7 +61,8 @@ async function cancelGame(cloud, db, gameId, { by, operatorId, reason }) {
 async function finishCancelRefunds(cloud, db, gameId) {
   await markOut(db, { gameId }, 'cancelled')
   await refundOutItems(cloud, db, { gameId })
-  const left = await db.collection('order_items').where({ gameId, kind: 'game', status: 'active' }).count()
+  // 這場所有已付款的卡片都退完（退完的會變成 refunded）才算完成，不只看「待使用」的（澄清 O4）
+  const left = await db.collection('order_items').where({ gameId, kind: 'game', status: db.command.in(PAID) }).count()
   if (!left.total) await db.collection('games').doc(gameId).update({ data: { refundPending: false } })
   return left.total
 }
@@ -67,7 +71,7 @@ async function finishCancelRefunds(cloud, db, gameId) {
 async function refundOutItems(cloud, db, where, limit = 50) {
   const _ = db.command
   const res = await db.collection('order_items')
-    .where(_.and([{ ...where, kind: 'game', status: 'active', gameOut: _.exists(true) }, _.or([{ refunding: _.exists(false) }, { refunding: '' }])]))
+    .where(_.and([{ ...where, kind: 'game', status: _.in(PAID), gameOut: _.exists(true) }, _.or([{ refunding: _.exists(false) }, { refunding: '' }])]))
     .limit(limit).get()
   let n = 0
   for (const it of res.data) {
@@ -86,7 +90,7 @@ async function kick(cloud, db, game, itemId, operator) {
   const it = await ord.dget(db, 'order_items', itemId)
   if (!it || it.kind !== 'game' || it.gameId !== game._id) return u.fail('报名记录不存在')
   if (!(game.roster || []).some(p => p.itemId === itemId && (p.state === 'j' || p.state === 'w'))) return u.fail('该客人不在名单上')
-  if (it.status !== 'active') return u.fail('该报名还没付款或已退款')
+  if (it.status !== 'active') return u.fail('该报名还没付款、已退款或球局已结束')
   if (it.refunding) return u.fail('正在退款中，请稍后')
   if (!it.gameOut) await db.collection('order_items').doc(itemId).update({ data: { gameOut: 'kicked' } })
   const r = await refundGameItem(cloud, db, { ...it, gameOut: 'kicked' }, 'admin', operator._id)
@@ -101,7 +105,8 @@ async function tick(cloud, db, now, timeLeft) {
   const due = await db.collection('games').where({ status: 'open', startAt: _.lte(now + games.AUTO_CANCEL_BEFORE), autoChecked: _.neq(true) }).limit(20).get()
   for (const g of due.data) {
     if (!timeLeft()) return
-    const reason = games.autoCancelReason(g, now)
+    // 開局了才輪到檢查（例如定時任務停過）：不再取消，人都可能已經在打球了
+    const reason = now < g.startAt ? games.autoCancelReason(g, now) : ''
     if (reason) await cancelGame(cloud, db, g._id, { by: 'system', reason }).catch(e => console.error('autoCancel', g._id, e))
     else await db.collection('games').doc(g._id).update({ data: { autoChecked: true } })
   }
@@ -115,21 +120,41 @@ async function tick(cloud, db, now, timeLeft) {
   const started = await db.collection('games').where({ status: 'open', startAt: _.lte(now), nofillDone: _.neq(true) }).limit(20).get()
   for (const g of started.data) {
     if (!timeLeft()) return
-    const ids = (g.roster || []).filter(p => p.state === 'w').map(p => p.itemId)
-    if (ids.length) await markOut(db, { _id: _.in(ids) }, 'nofill')
-    await db.collection('games').doc(g._id).update({ data: { nofillDone: true } })
+    // 某一場出錯不影響其他場和後面的步驟，下一分鐘重做
+    try {
+      const ids = (g.roster || []).filter(p => p.state === 'w').map(p => p.itemId)
+      if (ids.length) await markOut(db, { _id: _.in(ids) }, 'nofill')
+      await db.collection('games').doc(g._id).update({ data: { nofillDone: true } })
+    } catch (e) {
+      console.error('nofill', g._id, e)
+    }
   }
   // 3. 退款重試
-  if (timeLeft()) await refundOutItems(cloud, db, {}, 30)
-  // 4. 結束了的已報名卡片
-  const done = await db.collection('order_items').where({ kind: 'game', status: 'active', endAt: _.lte(now), gameOut: _.exists(false) }).limit(200).get()
-  if (done.data.length) {
-    const ids = done.data.map(i => i._id)
-    await db.collection('order_items').where({ _id: _.in(ids), status: 'active', gameOut: _.exists(false) }).update({ data: { status: 'used' } })
-    for (const orderId of [...new Set(done.data.map(i => i.orderId))]) {
-      if (!timeLeft()) break
-      await ord.refreshStatus(db, orderId).catch(e => console.error('game refreshStatus', orderId, e))
+  if (timeLeft()) await refundOutItems(cloud, db, {}, 30).catch(e => console.error('game refunds', e))
+  // 4. 結束了的已報名卡片標「已使用」：逐張在事務裡讀最新的卡片和球局，
+  //    只有球局沒取消、這張卡片在名單上是「已報名」才標（澄清 O4）；取消的球局交給補退款，候補交給開局處理
+  const done = await db.collection('order_items').where({ kind: 'game', status: 'active', endAt: _.lte(now), gameOut: _.exists(false) }).orderBy('endAt', 'asc').limit(100).get()
+  const touched = new Set()
+  for (const it of done.data) {
+    if (!timeLeft()) break
+    try {
+      const used = await ord.tx(db, async t => {
+        const cur = await ord.tget(t, 'order_items', it._id)
+        const g = await ord.tget(t, 'games', it.gameId)
+        if (!cur || cur.status !== 'active' || cur.gameOut || cur.refunding) return false
+        if (!g || g.status !== 'open' || g.endAt > now) return false
+        if (!(g.roster || []).some(p => p.itemId === it._id && p.state === 'j')) return false
+        await t.collection('order_items').doc(it._id).update({ data: { status: 'used' } })
+        return true
+      })
+      if (used) touched.add(it.orderId)
+    } catch (e) {
+      console.error('game finish', it._id, e)
     }
+  }
+  for (const orderId of touched) {
+    if (!timeLeft()) break
+    await ord.refreshStatus(db, orderId).catch(e => console.error('game refreshStatus', orderId, e))
   }
 }
 

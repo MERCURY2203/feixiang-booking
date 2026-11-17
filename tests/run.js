@@ -2258,6 +2258,113 @@ test('O3 發布球局途中那天被設為休息：發布被拒絕，不會在�
   mustFail(await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true }), /已有订单/)
 })
 
+function failCancelMark() {
+  const real = F.db.collection
+  F.db.collection = n => {
+    const c = real(n)
+    if (n === 'order_items') {
+      const w = c.where
+      c.where = q => {
+        const x = w(q)
+        const up = x.update
+        x.update = async p => {
+          if (p.data && p.data.gameOut === 'cancelled') throw new Error('one update request failed')
+          return up(p)
+        }
+        return x
+      }
+    }
+    return c
+  }
+  return () => (F.db.collection = real)
+}
+
+test('O4 取消後標記退款一直失敗、拖過結束時間：卡片不會被當成「已使用」，恢復後全額退款，退完才清待辦', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO')
+  const a = await joinGame('oA', id, 'M')
+  const restore = failCancelMark()
+  try {
+    must(await call(admin, 'oO', { action: 'gameCancel', id }))
+    clock.now = doc('games', id).endAt + MIN
+    await runTimer()
+    assert.strictEqual(gameItem(a.orderId).status, 'active', '取消的球局不能標已使用')
+    assert.strictEqual(doc('games', id).refundPending, true)
+  } finally {
+    restore()
+  }
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(wechat.refundedTotal(a.orderId), 4500)
+  assert.strictEqual(doc('orders', a.orderId).status, 'refunded')
+  assert.strictEqual(gameItem(a.orderId).status, 'refunded')
+  assert.strictEqual(doc('games', id).refundPending, false)
+  checkInvariants()
+})
+
+test('O4b 舊版本已誤標「已使用」又清了待辦的取消球局：執行 initdb 後定時任務補退', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO')
+  const a = await joinGame('oA', id, 'M')
+  must(await call(admin, 'oO', { action: 'gameCancel', id }))
+  // 模擬舊版本留下的錯誤資料：退款前卡片被標成已使用、待辦被清掉
+  const restoreRefund = cloudPay.refund
+  store.write('order_items', gameItem(a.orderId)._id, { ...gameItem(a.orderId), status: 'used', gameOut: undefined, refunding: '', refundedFee: 0, refundingFee: 0 })
+  store.write('games', id, { ...doc('games', id), refundPending: false })
+  for (const r of all('refunds')) store.write('refunds', r._id, null)
+  wechat.refunds = {}
+  store.write('orders', a.orderId, { ...doc('orders', a.orderId), status: 'completed', refundedFee: 0, refundCount: 0, refundSeq: 0 })
+  cloudPay.refund = restoreRefund
+  const r = await call(F.loadFn('initdb'), '', {})
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.migration.gamesRefundReopened)), [id])
+  clock.now += 2 * MIN
+  await runTimer()
+  assert.strictEqual(wechat.refundedTotal(a.orderId), 4500)
+  assert.strictEqual(gameItem(a.orderId).status, 'refunded')
+  assert.strictEqual(doc('games', id).refundPending, false)
+})
+
+test('O4c 結束後只把「已報名」標成已使用：候補（開局標記失敗時）不會被誤標；開局後才輪到檢查的不再自動取消', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { capM: 1, minPlayers: 3 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'M')
+  assert.strictEqual(stateOf(id, 'uB'), 'w')
+  // 定時任務停過：直接到開局後才第一次執行；開局時候補的標記被擋住
+  const real = F.db.collection
+  F.db.collection = n => {
+    const c = real(n)
+    if (n === 'order_items') {
+      const w = c.where
+      c.where = q => {
+        const x = w(q)
+        const up = x.update
+        x.update = async p => {
+          if (p.data && p.data.gameOut === 'nofill') throw new Error('db error')
+          return up(p)
+        }
+        return x
+      }
+    }
+    return c
+  }
+  try {
+    clock.now = doc('games', id).endAt + MIN
+    await runTimer()
+  } finally {
+    F.db.collection = real
+  }
+  assert.strictEqual(doc('games', id).status, 'open', '開局後才檢查，不自動取消')
+  assert.strictEqual(gameItem(a.orderId).status, 'used')
+  assert.strictEqual(gameItem(b.orderId).status, 'active', '候補不能標已使用')
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(gameItem(b.orderId).gameOut, 'nofill')
+  assert.strictEqual(wechat.refundedTotal(b.orderId), 4500)
+  assert.strictEqual(doc('orders', a.orderId).status, 'completed')
+  checkInvariants()
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {
