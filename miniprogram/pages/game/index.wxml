@@ -32,7 +32,7 @@
       </view>
     </view>
 
-    <view class="notice">开局前 15 分钟之前可退出，全额原路退回<text wx:if="{{g.minPlayers}}">；不满 {{g.minPlayers}} 人开局前 2 小时自动取消并全额退款</text>。</view>
+    <view class="notice">开局前 15 分钟之前可退出，全额原路退回<text wx:if="{{g.autoCancel}}">；开局前 2 小时{{g.minPlayers ? '不满 ' + g.minPlayers + ' 人' : '无人报名'}}会自动取消并全额退款</text>。</view>
     <view class="bottom-spacer"></view>
   </view>
 

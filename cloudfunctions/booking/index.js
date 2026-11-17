@@ -378,6 +378,7 @@ async function gameDetail(id, openid) {
     ...gameCard(g, now), status, desc: g.desc || '', when: gameWhen(g), hours: g.endHour - g.startHour,
     quitBefore: `${u.cnDate(g.date)} ${new Date(g.startAt - games.QUIT_BEFORE + 8 * u.HOUR).toISOString().slice(11, 16)}`,
     cap: g.cap || 0, capM: g.capM || 0, capF: g.capF || 0, minPlayers: g.minPlayers || 0,
+    autoCancel: games.autoChecks(g) && !g.autoChecked,
     views: (g.views || 0) + 1, joined: c.joined, M: c.M, F: c.F, waitingCount: c.waiting,
     // 名單只公開頭像、暱稱、性別（澄清 N17）
     players: (g.roster || []).filter(p => p.state === 'j').sort((a, b) => a.at - b.at)

@@ -9,7 +9,8 @@
       <view class="stat"><view class="sv">{{g.M}} · {{g.F}}</view><view class="sl">男 · 女</view></view>
       <view class="stat"><view class="sv">{{g.waiting}}</view><view class="sl">候补</view></view>
     </view>
-    <view wx:if="{{g.minPlayers}}" class="muted small">最少 {{g.minPlayers}} 人；开局前 2 小时不足会自动取消</view>
+    <view wx:if="{{g.autoCancel}}" class="muted small">开局前 2 小时{{g.minPlayers ? '不满 ' + g.minPlayers + ' 人' : '无人报名'}}会自动取消并全额退款</view>
+    <view wx:elif="{{g.status === '报名中'}}" class="muted small">开局前不到 2 小时发布，不会自动取消</view>
   </view>
 
   <view class="card">

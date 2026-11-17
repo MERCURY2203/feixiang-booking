@@ -2107,6 +2107,26 @@ test('N13 報名走同一結算流程：呼叫 gameJoin 並帶性別；隱私政
   assert(/PRIVACY_VERSION: '2026-11-17'/.test(cfg))
 })
 
+test('N14 開局前 2 小時檢查：沒人報名也取消（不論有沒有設最少人數）；開局前不到 2 小時才發布的不自動取消', async () => {
+  seedGamePeople()
+  const empty = await publishGame('oO') // 沒設最少人數
+  const someone = await publishGame('oO', { cells: gameCells([8], [19, 20]) })
+  await joinGame('oA', someone, 'M')
+  // 開局前 1 小時才發布：沒人報名也不取消
+  clock.now = GSTART - 3600 * 1000
+  const late = await publishGame('oO', { cells: gameCells([9], [19, 20]), minPlayers: 4 })
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(doc('games', empty).status, 'cancelled')
+  assert.strictEqual(doc('games', empty).cancelReason, '开局前 2 小时无人报名，自动取消')
+  assert.strictEqual(doc('games', someone).status, 'open')
+  assert.strictEqual(doc('games', late).status, 'open')
+  assert.strictEqual(doc('games', late).autoChecked, true)
+  const view = must(await call(booking, 'oB', { action: 'game', id: late }))
+  assert.strictEqual(view.autoCancel, false)
+  checkInvariants()
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

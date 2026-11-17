@@ -76,4 +76,18 @@ function waitRank(game, userId) {
   return i < 0 ? 0 : i + 1
 }
 
-module.exports = { QUIT_BEFORE, AUTO_CANCEL_BEFORE, live, seats, fits, canSeat, promote, removeItem, counts, waitRank }
+// 這場球局會不會在開局前 2 小時被自動檢查（發布時間早於那個時間點才會）
+function autoChecks(g) {
+  return (g.createdAt || 0) <= g.startAt - AUTO_CANCEL_BEFORE
+}
+
+// 開局前 2 小時檢查：要自動取消時返回原因，否則返回空字串（澄清 N13）
+function autoCancelReason(g, now) {
+  if (!autoChecks(g)) return ''
+  const c = counts(g, now)
+  if (c.joined === 0) return '开局前 2 小时无人报名，自动取消'
+  if (g.minPlayers && c.joined < g.minPlayers) return `报名不足 ${g.minPlayers} 人，自动取消`
+  return ''
+}
+
+module.exports = { QUIT_BEFORE, AUTO_CANCEL_BEFORE, autoChecks, autoCancelReason, live, seats, fits, canSeat, promote, removeItem, counts, waitRank }

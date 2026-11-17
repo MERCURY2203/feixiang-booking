@@ -57,7 +57,7 @@
         <input class="field" type="number" value="{{capF}}" data-field="capF" bindinput="input" placeholder="不填不限" />
       </view>
     </view>
-    <view class="muted small">带 * 的是必填。可退截止自动定为开局前 15 分钟；设了最少人数的，开局前 2 小时人数不足会自动取消并全额退款。</view>
+    <view class="muted small">带 * 的是必填。可退截止自动定为开局前 15 分钟。开局前 2 小时无人报名、或设了最少人数而不足，会自动取消并全额退款；开局前不到 2 小时才发布的不会自动取消。</view>
   </view>
 
   <view wx:if="{{errText}}" class="errbox">{{errText}}</view>

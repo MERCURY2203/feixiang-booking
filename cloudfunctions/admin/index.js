@@ -465,6 +465,7 @@ async function gameGet(user, id) {
     ...adminGameCard(g, now), cover: g.cover || '', tags: g.tags || [], desc: g.desc || '', priceM: g.priceM, priceF: g.priceF,
     cap: g.cap || 0, capM: g.capM || 0, capF: g.capF || 0, minPlayers: g.minPlayers || 0,
     joined: c.joined, M: c.M, F: c.F, waiting: c.waiting, income, list,
+    autoCancel: games.autoChecks(g) && !g.autoChecked && g.status === 'open',
     canCancel: g.status === 'open' && g.startAt > now, canKick: g.status === 'open' && g.endAt > now,
     canEditGender: user.role !== 'host'
   })

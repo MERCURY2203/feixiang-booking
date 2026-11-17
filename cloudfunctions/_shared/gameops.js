@@ -86,12 +86,13 @@ async function kick(cloud, db, game, itemId, operator) {
 // 定時任務：人數不足自動取消、開局時候補記 nofill、退款重試、結束後標「已使用」
 async function tick(cloud, db, now, timeLeft) {
   const _ = db.command
-  // 1. 人數不足：開局前 2 小時（含已開始還沒處理的）
-  const low = await db.collection('games').where({ status: 'open', minPlayers: _.gt(0), startAt: _.lte(now + games.AUTO_CANCEL_BEFORE), autoChecked: _.neq(true) }).limit(20).get()
-  for (const g of low.data) {
+  // 1. 開局前 2 小時檢查一次（澄清 N13）：沒人報名、或未達最少人數 → 自動取消；
+  //    開局前不到 2 小時才發布的不檢查（檢查時間點已過），由發起人自己決定
+  const due = await db.collection('games').where({ status: 'open', startAt: _.lte(now + games.AUTO_CANCEL_BEFORE), autoChecked: _.neq(true) }).limit(20).get()
+  for (const g of due.data) {
     if (!timeLeft()) return
-    const c = games.counts(g, now)
-    if (c.joined < g.minPlayers) await cancelGame(cloud, db, g._id, { by: 'system', reason: `报名不足 ${g.minPlayers} 人，自动取消` }).catch(e => console.error('autoCancel', g._id, e))
+    const reason = games.autoCancelReason(g, now)
+    if (reason) await cancelGame(cloud, db, g._id, { by: 'system', reason }).catch(e => console.error('autoCancel', g._id, e))
     else await db.collection('games').doc(g._id).update({ data: { autoChecked: true } })
   }
   // 2. 開局了：候補還沒補上的記 nofill
