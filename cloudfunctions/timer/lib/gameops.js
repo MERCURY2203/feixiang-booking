@@ -41,16 +41,26 @@ async function cancelGame(cloud, db, gameId, { by, operatorId, reason }) {
       if (l && l.status === 'game' && l.gameId === g._id) unlock.push(id)
     }
     for (const id of unlock) await t.collection('slot_locks').doc(id).remove()
-    const data = { status: 'cancelled', cancelledAt: Date.now(), cancelBy: by, cancelReason: reason || '' }
+    // refundPending：和「已取消」同一個事務寫入，退款沒全部做完前定時任務會一直補（澄清 O1）
+    const data = { status: 'cancelled', cancelledAt: Date.now(), cancelBy: by, cancelReason: reason || '', refundPending: true }
     await t.collection('games').doc(gameId).update({ data })
     return { g: { ...g, ...data } }
   })
-  await markOut(db, { gameId }, 'cancelled')
-  await refundOutItems(cloud, db, { gameId })
+  // 取消已經成立；標記和退款中途出錯也不影響，定時任務會接著做
+  await finishCancelRefunds(cloud, db, gameId).catch(e => console.error('cancel refunds', gameId, e))
   if (!r.already) {
     await ord.notify(db, 'game', `【球局已取消】${r.g.title}\n${u.cnDate(r.g.date)} ${cellsText(r.g)}${reason ? `\n原因：${reason}` : ''}`)
   }
   return r.g
+}
+
+// 已取消球局的退款：標記 → 退款 → 全部已付款的卡片都退完（沒有 status active 的）才清掉 refundPending
+async function finishCancelRefunds(cloud, db, gameId) {
+  await markOut(db, { gameId }, 'cancelled')
+  await refundOutItems(cloud, db, { gameId })
+  const left = await db.collection('order_items').where({ gameId, kind: 'game', status: 'active' }).count()
+  if (!left.total) await db.collection('games').doc(gameId).update({ data: { refundPending: false } })
+  return left.total
 }
 
 // 退掉記了 gameOut 但還沒退的卡片（盡力而為，失敗的留給定時任務）
@@ -95,7 +105,13 @@ async function tick(cloud, db, now, timeLeft) {
     if (reason) await cancelGame(cloud, db, g._id, { by: 'system', reason }).catch(e => console.error('autoCancel', g._id, e))
     else await db.collection('games').doc(g._id).update({ data: { autoChecked: true } })
   }
-  // 2. 開局了：候補還沒補上的記 nofill
+  // 1b. 已取消但退款還沒全部做完的球局：接著標記和退款（澄清 O1）
+  const pend = await db.collection('games').where({ status: 'cancelled', refundPending: true }).limit(10).get()
+  for (const g of pend.data) {
+    if (!timeLeft()) return
+    await finishCancelRefunds(cloud, db, g._id).catch(e => console.error('finishCancelRefunds', g._id, e))
+  }
+  // 2. 開局了：候補還沒補上的記 nofill（開局後不再補位，所以這時的候補名單不會再變）
   const started = await db.collection('games').where({ status: 'open', startAt: _.lte(now), nofillDone: _.neq(true) }).limit(20).get()
   for (const g of started.data) {
     if (!timeLeft()) return
@@ -117,4 +133,4 @@ async function tick(cloud, db, now, timeLeft) {
   }
 }
 
-module.exports = { OUT_REASON, cellsText, refundGameItem, cancelGame, refundOutItems, kick, tick }
+module.exports = { OUT_REASON, cellsText, refundGameItem, cancelGame, finishCancelRefunds, refundOutItems, kick, tick }

@@ -35,9 +35,11 @@ function canSeat(game, gender, now, exceptUserId) {
 }
 
 // 補位：按候補先後，符合上限的候補變成已報名，直到沒有可補的。返回新名單和補上的人
+// 只在球局未取消、還沒開局時補位；開局那一刻還在候補的一律按「候补未补上」退款（澄清 O2）
 function promote(game, now) {
   const roster = (game.roster || []).map(p => ({ ...p }))
   const promoted = []
+  if (game.status !== 'open' || now >= game.startAt) return { roster, promoted }
   const waiting = roster.filter(p => p.state === 'w').sort((a, b) => a.at - b.at)
   for (const p of waiting) {
     const c = seats({ ...game, roster }, now)

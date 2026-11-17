@@ -2127,6 +2127,137 @@ test('N14 開局前 2 小時檢查：沒人報名也取消（不論有沒有設�
   checkInvariants()
 })
 
+// ---------------- Codex 2026-11-16 複查 G1–G3（澄清 O 節） ----------------
+
+test('O1 取消球局後、標記退款前數據庫出錯：定時任務自動補退全部已付款的人', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'F') // 候補
+  const real = F.db.collection
+  F.db.collection = n => {
+    const c = real(n)
+    if (n === 'order_items') {
+      const w = c.where
+      c.where = q => {
+        const x = w(q)
+        const up = x.update
+        x.update = async p => {
+          if (p.data && p.data.gameOut === 'cancelled') throw new Error('database unavailable')
+          return up(p)
+        }
+        return x
+      }
+    }
+    return c
+  }
+  try {
+    must(await call(admin, 'oO', { action: 'gameCancel', id })) // 取消已成立，退款交給定時任務
+  } finally {
+    F.db.collection = real
+  }
+  assert.strictEqual(doc('games', id).status, 'cancelled')
+  assert.strictEqual(doc('games', id).refundPending, true)
+  assert.strictEqual(doc('orders', a.orderId).status, 'active')
+  for (let n = 0; n < 3; n++) {
+    clock.now += MIN
+    await runTimer()
+  }
+  assert.strictEqual(doc('orders', a.orderId).status, 'refunded')
+  assert.strictEqual(doc('orders', b.orderId).status, 'refunded')
+  assert.strictEqual(wechat.refundedTotal(a.orderId), 4500)
+  assert.strictEqual(wechat.refundedTotal(b.orderId), 3500)
+  assert.strictEqual(doc('games', id).refundPending, false)
+  checkInvariants()
+})
+
+test('O2 開局前申請退出、開局後才退款成功：候補不會被補上，按「候补未补上」全額退款', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'F')
+  const real = cloudPay.refund
+  try {
+    cloudPay.refund = async () => {
+      throw new Error('offline before send')
+    }
+    must(await call(booking, 'oA', { action: 'refund', orderId: a.orderId, itemId: gameItem(a.orderId)._id }))
+    // 開局前 2 小時的檢查照常（A 還在名單上，不取消）；微信一直聯絡不上，退款到開局後才成功
+    clock.now = GSTART - 2 * 3600 * 1000 + MIN
+    await runTimer()
+    assert.strictEqual(doc('games', id).autoChecked, true)
+  } finally {
+    cloudPay.refund = real
+  }
+  assert.strictEqual(stateOf(id, 'uB'), 'w', 'O2-1')
+  clock.now = GSTART + MIN
+  await runTimer()
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(doc('orders', a.orderId).status, 'refunded', 'O2-2')
+  assert.notStrictEqual(stateOf(id, 'uB'), 'j')
+  assert.strictEqual(gameItem(b.orderId).gameOut, 'nofill', 'O2-3')
+  assert.strictEqual(doc('orders', b.orderId).status, 'refunded', 'O2-4')
+  assert.strictEqual(wechat.refundedTotal(b.orderId), 3500, 'O2-5')
+  // 開局前的正常補位照常
+  const g = doc('games', id)
+  const games = require('../cloudfunctions/_shared/games')
+  const before = games.promote({ ...g, status: 'open', roster: [{ userId: 'x', gender: 'M', state: 'w', at: 1, itemId: 'i' }] }, g.startAt - MIN)
+  assert.deepStrictEqual(before.promoted, ['x'])
+  const cancelled = games.promote({ ...g, status: 'cancelled', roster: [{ userId: 'x', gender: 'M', state: 'w', at: 1, itemId: 'i' }] }, g.startAt - MIN)
+  assert.deepStrictEqual(cancelled.promoted, [])
+  checkInvariants()
+})
+
+test('O3 發布球局途中那天被設為休息：發布被拒絕，不會在休息日鎖場', async () => {
+  seedGamePeople()
+  let enter
+  let release
+  const reached = new Promise(r => (enter = r))
+  const wait = new Promise(r => (release = r))
+  const real = F.db.collection
+  let once = false
+  // 發布第一次讀日期鎖時暫停，這時有人把那天設為休息（Codex G3 的重現方法）
+  F.db.collection = n => {
+    const c = real(n)
+    if (n === 'locks') {
+      const d = c.doc.bind(c)
+      c.doc = docId => {
+        const x = d(docId)
+        const g = x.get.bind(x)
+        x.get = async () => {
+          if (docId === `day_${D}` && !once) {
+            once = true
+            enter()
+            await wait
+          }
+          return g()
+        }
+        return x
+      }
+    }
+    return c
+  }
+  let publishing
+  try {
+    publishing = call(admin, 'oO', { action: 'gamePublish', game: { date: D, cells: [{ court: 1, hour: 19 }], title: 'Late', desc: 'd', priceM: 5000, priceF: 4000 } })
+    await reached
+    F.db.collection = real
+    must(await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true }))
+  } finally {
+    F.db.collection = real
+    release()
+  }
+  const r = await publishing
+  assert(!r.ok, `應該被拒絕：${JSON.stringify(r)}`)
+  assert.strictEqual(all('games').length, 0)
+  assert.strictEqual(all('slot_locks').filter(l => l.status === 'game').length, 0)
+  // 反過來：先發布成功，再設休息日 → 因為有球局，休息日保存被擋下
+  must(await call(admin, 'oO', { action: 'deleteSpecial', id: `special_${D}` }))
+  await publishGame('oO')
+  mustFail(await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: true }), /已有订单/)
+})
+
 ;(async () => {
   let failed = 0
   for (const t of tests) {

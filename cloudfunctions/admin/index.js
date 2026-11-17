@@ -364,6 +364,9 @@ async function gamePublish(user, g) {
   if (cells.length > 30) return u.fail('一场球局最多锁 30 格')
   const hours = [...new Set(cells.map(c => c.hour))].sort((a, b) => a - b)
   if (hours[hours.length - 1] - hours[0] + 1 !== hours.length) return u.fail('所选时段要连续')
+  // 先記下日期鎖的營業時間版本，再讀營業時間檢查；事務裡確認版本沒變（與下單相同順序，澄清 O3）
+  const dayLock = await ord.dget(db, 'locks', `day_${date}`)
+  const hoursVer = (dayLock && dayLock.hoursVer) || 0
   const now = Date.now()
   const cfg = await cal.loadConfig(db)
   if (!cal.bookableDays(cfg, now).includes(date)) return u.fail('该日期不可预订')
@@ -378,8 +381,6 @@ async function gamePublish(user, g) {
     const o = await ord.dget(db, 'orders', orderId)
     if (o) await ord.settle(cloud, db, o)
   }
-  const dayLock = await ord.dget(db, 'locks', `day_${date}`)
-  const hoursVer = (dayLock && dayLock.hoursVer) || 0
 
   const game = {
     title: String(g.title).trim().slice(0, 40), cover: typeof g.cover === 'string' && g.cover.startsWith('cloud://') ? g.cover : '',
