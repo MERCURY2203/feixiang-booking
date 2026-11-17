@@ -16,7 +16,7 @@ Component({
       app.userReady.then(() => {
         const user = app.globalData.user
         const role = user && user.role
-        if (role !== 'owner' && role !== 'staff') {
+        if (role !== 'owner' && role !== 'staff' && role !== 'host') {
           wx.switchTab({ url: '/pages/me/index' })
           return
         }

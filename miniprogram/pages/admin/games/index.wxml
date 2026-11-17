@@ -1,0 +1,15 @@
+<admin-drawer current="games" title="球局管理" />
+<view class="tabs">
+  <view class="tab {{tab === 'open' ? 'on' : ''}}" data-tab="open" bindtap="switchTab">进行中</view>
+  <view class="tab {{tab === 'ended' ? 'on' : ''}}" data-tab="ended" bindtap="switchTab">已结束</view>
+</view>
+<view class="container">
+  <view wx:if="{{loaded && !list.length}}" class="placeholder">{{tab === 'open' ? '还没有进行中的球局，点击下方按钮发起' : '没有已结束的球局'}}</view>
+  <view wx:for="{{list}}" wx:key="_id" class="card" data-id="{{item._id}}" bindtap="open">
+    <view class="row"><text class="card-title">{{item.title}}</text><text class="st">{{item.status}}</text></view>
+    <view class="muted">{{item.when}} · {{item.courtsText}}</view>
+    <view class="row"><text class="muted">{{item.count}}</text><text class="muted">发起人：{{item.host}}</text></view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="create">+ 发起球局</button></view>

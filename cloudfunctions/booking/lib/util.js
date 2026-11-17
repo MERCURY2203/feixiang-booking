@@ -130,5 +130,5 @@ function legacyLines(summary) {
 module.exports = {
   HOUR, DAY, ok, fail, pad, dateStr, dayStart, slotStart, addDays, weekday, hourNow,
   dateLabel, cnDate, hourRange, orderLines, legacyLines, slotId, parseWxTime, toWxTime, formatFen, maskPhone,
-  randomDigits, newId, COURTS: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  randomDigits, newId, WEEK, COURTS: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 }

@@ -1,4 +1,4 @@
-// 員工管理（僅老闆）：列表、改備註名、新增（邀請二維碼，10 分鐘一次性）、移除
+// 員工管理（僅老闆）：列表、改備註名、邀請員工或組局員（邀請二維碼，10 分鐘一次性，澄清 N1）、移除
 const api = require('../../../utils/api')
 const { formatBeijing, now } = require('../../../utils/time')
 
@@ -19,7 +19,7 @@ Page({
       .then(list => {
         this.setData({
           loaded: true,
-          list: list.map(s => ({ ...s, joinedText: formatBeijing(s.staffSince) }))
+          list: list.map(s => ({ ...s, joinedText: formatBeijing(s.staffSince), roleText: s.role === 'host' ? '组局员' : '员工' }))
         })
       })
       .catch(err => api.toast(err.message))
@@ -49,8 +49,10 @@ Page({
     const index = e.currentTarget.dataset.index
     const item = this.data.list[index]
     wx.showModal({
-      title: '移除员工',
-      content: `确定移除「${item.remark || item.nickname || '该员工'}」？移除后立即失去管理权限。别忘了同时把他移出企业微信群。`,
+      title: `移除${item.roleText}`,
+      content: item.role === 'host'
+        ? `确定移除「${item.remark || item.nickname || '该组局员'}」？移除后立即失去发起球局的权限，他发起的球局保留，由员工和老板继续管理。`
+        : `确定移除「${item.remark || item.nickname || '该员工'}」？移除后立即失去管理权限。别忘了同时把他移出企业微信群。`,
       confirmText: '移除',
       confirmColor: '#E54545',
       success: res => {
@@ -67,13 +69,14 @@ Page({
     })
   },
 
-  createInvite() {
+  createInvite(e) {
+    const type = e.currentTarget.dataset.type === 'host' ? 'host' : 'staff'
     wx.showLoading({ title: '生成中' })
     api
-      .call('staff', 'createInvite')
+      .call('staff', 'createInvite', { type })
       .then(invite => {
         wx.hideLoading()
-        this.setData({ invite })
+        this.setData({ invite: { ...invite, typeText: type === 'host' ? '组局员' : '员工' } })
         this.tick()
         clearInterval(this.timer)
         this.timer = setInterval(() => this.tick(), 1000)

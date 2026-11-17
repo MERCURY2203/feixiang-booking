@@ -6,6 +6,7 @@
 // 5. 固定日期活動過期：未使用張數自動全額退款
 // 6. 每天凌晨 3 點：最後一次訂場超過 1 年的客人，自動刪除手機號、頭像、暱稱（訂單和核銷記錄裡的手機號一併刪除）
 // 7. 同一時間（凌晨 3 點）：日誌保留 1 年；訂單自交易完成起滿 3 年後匿名化
+// 8. 球局：人數不足自動取消、候補未補上退款、系統退款重試、結束後標「已使用」（澄清 N 節）
 // 每項任務分批處理，整次執行最多約 50 秒，做不完的下一分鐘繼續
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -15,6 +16,7 @@ const u = require('./lib/util')
 const pay = require('./lib/pay')
 const ord = require('./lib/orders')
 const cal = require('./lib/calendar')
+const gops = require('./lib/gameops')
 
 const BUDGET_MS = 50 * 1000
 let deadline = 0
@@ -175,7 +177,7 @@ async function purgePhones(now) {
     for (let i = 0; i < orderIds.length; i += 100) {
       await db.collection('verify_logs').where({ orderId: _.in(orderIds.slice(i, i + 100)) }).update({ data: { phone: '' } })
     }
-    await db.collection('users').where({ _id: _.in(ids) }).update({ data: { phone: '', nickname: '', avatar: '', phonePurgedAt: now } })
+    await db.collection('users').where({ _id: _.in(ids) }).update({ data: { phone: '', nickname: '', avatar: '', gender: '', phonePurgedAt: now } })
   }
 }
 
@@ -191,6 +193,7 @@ async function completedAt(o) {
   for (const it of items) {
     if (it.kind === 'court' && it.startAt) last = Math.max(last, it.startAt + u.HOUR)
     if (it.kind === 'product' && it.fixedDate && it.activityDate) last = Math.max(last, u.dayStart(it.activityDate) + u.DAY)
+    if (it.kind === 'game' && it.endAt) last = Math.max(last, it.endAt)
   }
   for (const v of await cal.getAll(db.collection('verify_logs'), { orderId: o._id })) last = Math.max(last, v.undoneAt || 0, v.at || 0)
   for (const r of await cal.getAll(db.collection('refunds'), { orderId: o._id })) last = Math.max(last, r.doneAt || 0, r.at || 0)
@@ -238,7 +241,8 @@ exports.main = async () => {
     ['reconcile', () => reconcile(now)],
     ['confirmRefunds', () => confirmRefunds(now)],
     ['finishCourts', () => finishCourts(now)],
-    ['expireProducts', () => expireProducts(now)]
+    ['expireProducts', () => expireProducts(now)],
+    ['games', () => gops.tick(cloud, db, now, timeLeft)]
   ]
   const d = new Date(now + 8 * u.HOUR)
   if (d.getUTCHours() === 3 && d.getUTCMinutes() < 10) {

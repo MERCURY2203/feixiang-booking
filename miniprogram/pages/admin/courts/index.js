@@ -1,7 +1,7 @@
 // 場地管理（鎖場，規格書「場地管理」，任務 T17）：點格子多選，再按「锁定」或「解锁」一次處理
 const api = require('../../../utils/api')
 
-const LABEL = { free: { cls: 'free', text: '' }, locked: { cls: 'locked', text: '已锁' }, booked: { cls: 'booked', text: '已订' }, pending: { cls: 'booked', text: '待支付' }, past: { cls: 'past', text: '' } }
+const LABEL = { free: { cls: 'free', text: '' }, locked: { cls: 'locked', text: '已锁' }, booked: { cls: 'booked', text: '已订' }, pending: { cls: 'booked', text: '待支付' }, game: { cls: 'booked', text: '球局' }, past: { cls: 'past', text: '' } }
 
 Page({
   data: { days: [], date: '', courts: [], hours: [], cells: [], gridHeight: 400, picked: 0 },
@@ -51,6 +51,7 @@ Page({
     if (s === 'past') return
     if (s === 'booked') return api.toast('该时段已有订单，请先退款再锁定')
     if (s === 'pending') return api.toast('该时段有待支付订单，请稍后再试')
+    if (s === 'game') return api.toast('该时段已被球局锁定，取消球局后才会放出')
     const key = `${r}_${c}`
     if (this.sel[key]) delete this.sel[key]
     else this.sel[key] = true

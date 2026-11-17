@@ -1727,7 +1727,7 @@ test('M4 活動詳情分享：標題、路徑直達該活動；已下架提示�
   const tabs = []
   const api = { toast: m => toasts.push(m), call: async (svc, action, x) => { const r = await call(booking, 'oA', { action, ...x }); if (!r.ok) throw Object.assign(new Error(r.message), r); return r.data } }
   const page = loadPage('miniprogram/pages/product/index.js', { '/api': api, '/cart': {}, '/checkout': {}, '/money': { formatFen: String }, '/share': share },
-    { wx: { switchTab: o => tabs.push(o.url), getEnterOptionsSync: () => ({ scene: 1007 }) }, setTimeout: fn => fn() })
+    { wx: { switchTab: o => tabs.push(o.url), getEnterOptionsSync: () => ({ scene: 1007 }) }, setTimeout: fn => fn(), getApp: () => ({ globalData: {} }) })
   page.onLoad({ id: 'p1', n: encodeURIComponent('周六团课'), pr: '8800' })
   await page.loadProduct()
   assert.deepStrictEqual(toasts, ['活动已下架'])
@@ -1755,13 +1755,13 @@ test('M5 朋友圈單頁模式：讀不到資料時顯示分享帶來的名稱�
   assert.strictEqual(comp.data.show, false)
 })
 
-test('M6 只有訂場首頁、活動列表、活動詳情可以分享', async () => {
+test('M6 只有訂場首頁、活動列表、活動詳情、球局詳情可以分享（澄清 N 節加入球局）', async () => {
   const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(x => (x.isDirectory() ? walk(path.join(d, x.name)) : [path.join(d, x.name)]))
   const sharing = walk(path.join(ROOT, 'miniprogram/pages'))
     .filter(f => f.endsWith('.js') && /onShareAppMessage|onShareTimeline/.test(fs.readFileSync(f, 'utf8')))
     .map(f => path.relative(path.join(ROOT, 'miniprogram'), f).split(path.sep).join('/'))
     .sort()
-  assert.deepStrictEqual(sharing, ['pages/activity/index.js', 'pages/booking/index.js', 'pages/product/index.js'])
+  assert.deepStrictEqual(sharing, ['pages/activity/index.js', 'pages/booking/index.js', 'pages/game/index.js', 'pages/product/index.js'])
   for (const f of sharing) {
     const src = fs.readFileSync(path.join(ROOT, 'miniprogram', f), 'utf8')
     assert(src.includes('onShareAppMessage') && src.includes('onShareTimeline'), `${f} 要同時支持轉發和朋友圈`)
@@ -1782,6 +1782,329 @@ test('M7 「+ 添加时段」接在最後一段後面；已到 24:00 不能再�
   page.addSlot()
   assert.strictEqual(page.data.form.slots.length, 2)
   assert.deepStrictEqual(toasts, ['已排到 24:00，无法再添加'])
+})
+
+// ---------------- 球局（2026-11-17，澄清 N 節） ----------------
+
+const GSTART = Date.UTC(2026, 10, 11, 11, 0, 0) // 2026-11-11 19:00 北京時間
+function seedGamePeople() {
+  store.write('users', 'uC', { openid: 'oC', role: 'customer', phone: '13800003333', nickname: 'C', phoneBoundAt: BASE })
+  store.write('users', 'uS', { openid: 'oS', role: 'staff', phone: '13900001111', nickname: '员工' })
+  store.write('users', 'uH', { openid: 'oH', role: 'host', phone: '13900002222', nickname: '阿杰' })
+  store.write('users', 'uH2', { openid: 'oH2', role: 'host', phone: '13900003333', nickname: 'Ken' })
+}
+const gameCells = (courts = [3, 4], hours = [19, 20]) => courts.flatMap(c => hours.map(h => ({ court: c, hour: h })))
+async function publishGame(openid, extra = {}) {
+  const r = must(await call(admin, openid, { action: 'gamePublish', game: {
+    date: D, cells: gameCells(), title: '周三晚 中级局', desc: '中羽3–4级，双打轮转', tags: '中级、双打', priceM: 4500, priceF: 3500, ...extra
+  } }))
+  return r._id
+}
+async function joinGame(openid, gameId, gender, pay = true) {
+  const r = must(await call(booking, openid, { action: 'gameJoin', gameId, gender }))
+  if (pay) await payAndNotify(r.orderId)
+  return r
+}
+const roster = id => doc('games', id).roster
+const stateOf = (id, userId) => (roster(id).find(p => p.userId === userId) || {}).state
+const gameItem = orderId => itemsOf(orderId)[0]
+
+test('N1 發起球局：必填項一次列出；格子被鎖後客人訂不到；已訂的格子不能鎖', async () => {
+  seedGamePeople()
+  const miss = await call(admin, 'oO', { action: 'gamePublish', game: { date: D, cells: [], title: '', desc: '', priceM: 4500 } })
+  mustFail(miss)
+  assert.deepStrictEqual(miss.missing, ['场地', '标题', '详情说明', '女价格'])
+  // 先有客人訂了 5 號場 19 點：球局不能鎖這格
+  await buy('oA', [court(5, 19)])
+  mustFail(await call(admin, 'oO', { action: 'gamePublish', game: { date: D, cells: [{ court: 5, hour: 19 }], title: 'x', desc: 'x', priceM: 1, priceF: 1 } }), /订走/)
+  mustFail(await call(admin, 'oO', { action: 'gamePublish', game: { date: D, cells: [{ court: 6, hour: 18 }, { court: 6, hour: 20 }], title: 'x', desc: 'x', priceM: 1, priceF: 1 } }), /连续/)
+  const id = await publishGame('oO')
+  const g = doc('games', id)
+  assert.strictEqual(g.startAt, GSTART)
+  assert.strictEqual(g.endAt, GSTART + 2 * 3600 * 1000)
+  assert.deepStrictEqual(g.tags, ['中级', '双打'])
+  assert.strictEqual(doc('slot_locks', `${D}_3_19`).status, 'game')
+  const sch = must(await call(booking, 'oB', { action: 'schedule', date: D }))
+  const row = sch.hours.findIndex(h => h.hour === 19)
+  assert.strictEqual(sch.cells[row][2].s, 'taken')
+  mustFail(await checkout('oB', [court(3, 19)]), /预订/)
+  // 管理端鎖場、解鎖都不能動球局的格子；營業時間不能縮掉球局時段
+  const lk = must(await call(admin, 'oO', { action: 'setLocks', date: D, cells: [{ court: 3, hour: 19 }], lock: true }))
+  assert.strictEqual(lk.failed.length, 1)
+  must(await call(admin, 'oO', { action: 'setLocks', date: D, cells: [{ court: 3, hour: 19 }], lock: false }))
+  assert.strictEqual(doc('slot_locks', `${D}_3_19`).status, 'game')
+  mustFail(await call(admin, 'oO', { action: 'saveSpecial', date: D, closed: false, open: 9, close: 19 }), /已有订单/)
+  checkInvariants()
+})
+
+test('N2 組局員只能用球局功能、只看到自己的球局；員工看到全部', async () => {
+  seedGamePeople()
+  const mine = await publishGame('oH')
+  const other = await publishGame('oH2', { cells: gameCells([7], [19, 20]) })
+  mustFail(await call(admin, 'oH', { action: 'orders' }), /无权限/)
+  mustFail(await call(admin, 'oH', { action: 'verifyLookup', code: '123456' }), /无权限/)
+  const list = must(await call(admin, 'oH', { action: 'gameList' }))
+  assert.deepStrictEqual(list.map(g => g._id), [mine])
+  mustFail(await call(admin, 'oH', { action: 'gameCancel', id: other }), /自己/)
+  mustFail(await call(admin, 'oH', { action: 'setGender', userId: 'uA', gender: 'F' }), /无权限/)
+  assert.strictEqual(must(await call(admin, 'oS', { action: 'gameList' })).length, 2)
+  assert.strictEqual(doc('games', mine).hostName, '阿杰')
+})
+
+test('N3 報名付款：男女不同價；性別第一次選定後不能自行改；不能重複報名', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO')
+  mustFail(await call(booking, 'oA', { action: 'gameJoin', gameId: id }), /性别/)
+  const a = await joinGame('oA', id, 'M')
+  assert.strictEqual(doc('orders', a.orderId).totalFee, 4500)
+  assert.strictEqual(doc('orders', a.orderId).status, 'active')
+  assert.strictEqual(stateOf(id, 'uA'), 'j')
+  assert.strictEqual(doc('users', 'uA').gender, 'M')
+  mustFail(await call(booking, 'oA', { action: 'gameJoin', gameId: id, gender: 'F' }), /已报名/)
+  const id2 = await publishGame('oO', { cells: gameCells([8], [19, 20]) })
+  const a2 = await joinGame('oA', id2, 'F') // 帳號上已是男：照男價
+  assert.strictEqual(doc('orders', a2.orderId).totalFee, 4500)
+  assert.strictEqual(doc('users', 'uA').gender, 'M')
+  const b = await joinGame('oB', id, 'F')
+  assert.strictEqual(doc('orders', b.orderId).totalFee, 3500)
+  const view = must(await call(booking, 'oC', { action: 'game', id }))
+  assert.strictEqual(view.joined, 2)
+  assert.deepStrictEqual(view.players.map(p => [p.nick, p.gender]), [['A', 'M'], ['B', 'F']])
+  assert(!JSON.stringify(view).includes('1380000'), '名單不能有手機號')
+  const mineView = must(await call(booking, 'oA', { action: 'game', id }))
+  assert.strictEqual(mineView.mine.state, 'j')
+  // 店員可以改性別，只影響之後的報名
+  must(await call(admin, 'oS', { action: 'setGender', userId: 'uA', gender: 'F' }))
+  assert.strictEqual(doc('users', 'uA').gender, 'F')
+  assert.strictEqual(roster(id).find(p => p.userId === 'uA').gender, 'M')
+  checkInvariants()
+})
+
+test('N4 男上限滿了男生候補、女生照常；有人退出，第一位符合的候補自動補上', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { capM: 1, cap: 3 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'M')
+  assert.strictEqual(b.waiting, true)
+  assert.strictEqual(stateOf(id, 'uB'), 'w')
+  const c = await joinGame('oC', id, 'F')
+  assert.strictEqual(stateOf(id, 'uC'), 'j')
+  const ov = must(await call(booking, 'oB', { action: 'orderDetail', orderId: b.orderId }))
+  assert.strictEqual(ov.items[0].state, '候补第 1 位')
+  // A 退出（開局前 15 分鐘之前）：全額退款，B 補上
+  const it = gameItem(a.orderId)
+  const r = must(await call(booking, 'oA', { action: 'refund', orderId: a.orderId, itemId: it._id }))
+  assert.strictEqual(r.amount, 4500)
+  assert.strictEqual(stateOf(id, 'uA'), undefined)
+  assert.strictEqual(stateOf(id, 'uB'), 'j')
+  assert.strictEqual(doc('orders', a.orderId).status, 'refunded')
+  checkInvariants()
+})
+
+test('N5 開局前 15 分鐘之後不能自行退出；開局時仍在候補的自動退款；結束後訂單完成', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'F')
+  assert.strictEqual(stateOf(id, 'uB'), 'w')
+  clock.now = GSTART - 14 * MIN
+  mustFail(await call(booking, 'oA', { action: 'refund', orderId: a.orderId, itemId: gameItem(a.orderId)._id }), /已过可退时间/)
+  clock.now = GSTART + MIN
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(gameItem(b.orderId).gameOut, 'nofill')
+  assert.strictEqual(doc('orders', b.orderId).status, 'refunded')
+  assert.strictEqual(stateOf(id, 'uB'), undefined)
+  assert.strictEqual(doc('orders', a.orderId).status, 'active')
+  clock.now = GSTART + 2 * 3600 * 1000 + MIN
+  await runTimer()
+  assert.strictEqual(gameItem(a.orderId).status, 'used')
+  assert.strictEqual(doc('orders', a.orderId).status, 'completed')
+  checkInvariants()
+})
+
+test('N6 移出並退款，空位補給候補；取消球局全部退款、格子放回、之後才付款的也退', async () => {
+  seedGamePeople()
+  const id = await publishGame('oH', { cap: 1 })
+  const a = await joinGame('oA', id, 'M')
+  const b = await joinGame('oB', id, 'F')
+  const kicked = must(await call(admin, 'oH', { action: 'gameKick', id, itemId: gameItem(a.orderId)._id }))
+  assert.strictEqual(kicked.amount, 4500)
+  assert.strictEqual(gameItem(a.orderId).gameOut, 'kicked')
+  assert.strictEqual(stateOf(id, 'uB'), 'j')
+  const ov = must(await call(booking, 'oA', { action: 'orderDetail', orderId: a.orderId }))
+  assert.strictEqual(ov.items[0].state, '被移出球局 · 已退款')
+  // C 報名候補但還沒付款時，球局被取消；C 之後才付款 → 自動退款
+  const c = await joinGame('oC', id, 'F', false)
+  must(await call(admin, 'oH', { action: 'gameCancel', id }))
+  assert.strictEqual(doc('games', id).status, 'cancelled')
+  assert.strictEqual(store.read('slot_locks', `${D}_3_19`).doc, null)
+  assert.strictEqual(doc('orders', b.orderId).status, 'refunded')
+  await payAndNotify(c.orderId)
+  assert.strictEqual(doc('orders', c.orderId).status, 'timeout_refunded')
+  // 格子回到可訂
+  must(await checkout('oB', [court(3, 19)]))
+  mustFail(await call(booking, 'oA', { action: 'gameJoin', gameId: id }), /已取消/)
+  assert.strictEqual(must(await call(booking, 'oA', { action: 'games' })).length, 0)
+  checkInvariants()
+})
+
+test('N7 最少人數不足，開局前 2 小時自動取消並退款；夠人的不取消', async () => {
+  seedGamePeople()
+  const low = await publishGame('oO', { minPlayers: 3 })
+  const ok = await publishGame('oO', { minPlayers: 1, cells: gameCells([8], [19, 20]) })
+  const a = await joinGame('oA', low, 'M')
+  await joinGame('oB', ok, 'F')
+  clock.now = GSTART - 2 * 3600 * 1000 - MIN
+  await runTimer()
+  assert.strictEqual(doc('games', low).status, 'open')
+  clock.now = GSTART - 2 * 3600 * 1000 + MIN
+  await runTimer()
+  assert.strictEqual(doc('games', low).status, 'cancelled')
+  assert.strictEqual(doc('games', ok).status, 'open')
+  assert.strictEqual(doc('orders', a.orderId).status, 'refunded')
+  assert.strictEqual(store.read('slot_locks', `${D}_3_19`).doc, null)
+  checkInvariants()
+})
+
+test('N8 待支付佔名額：5 分鐘沒付款名額放出；退款失敗由定時任務重試', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  await joinGame('oA', id, 'M', false)
+  const b = await joinGame('oB', id, 'F', false)
+  assert.strictEqual(b.waiting, true)
+  clock.now += 6 * MIN
+  const c = await joinGame('oC', id, 'F') // A 的待支付已過期，不再佔名額
+  assert.strictEqual(stateOf(id, 'uC'), 'j')
+  await runTimer()
+  assert.strictEqual(stateOf(id, 'uA'), undefined)
+  // 移出時微信退款不明：定時任務用同一單號重試
+  wechat.loseNextRefundResponse = true
+  must(await call(admin, 'oO', { action: 'gameKick', id, itemId: gameItem(c.orderId)._id }))
+  clock.now += 3 * MIN
+  await runTimer()
+  await runTimer()
+  assert.strictEqual(doc('orders', c.orderId).status, 'refunded')
+  checkInvariants()
+})
+
+test('N9 兩人同時搶最後一個名額：只有一人佔到名額，另一人排候補', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  const [a, b] = await Promise.all([
+    call(booking, 'oA', { action: 'gameJoin', gameId: id, gender: 'M' }),
+    call(booking, 'oB', { action: 'gameJoin', gameId: id, gender: 'F' })
+  ])
+  must(a)
+  must(b)
+  const states = roster(id).map(p => p.state).sort()
+  assert.deepStrictEqual(states, ['pj', 'pw'])
+  await payAndNotify(a.data.orderId)
+  await payAndNotify(b.data.orderId)
+  assert.deepStrictEqual(roster(id).map(p => p.state).sort(), ['j', 'w'])
+  checkInvariants()
+})
+
+test('N10 必填項一次列出全部沒填的（發起球局、編輯說明、商品保存）', async () => {
+  const money = loadUtil('utils/money.js')
+  const req = loadUtil('utils/required.js', { '/money': money })
+  assert.deepStrictEqual([...req.gameMissing({ picked: 0, title: ' ', desc: '', priceM: '45', priceF: '' })], ['场地', '标题', '详情说明', '女价格'])
+  assert.deepStrictEqual([...req.gameMissing({ picked: 4, title: 'a', desc: 'b', priceM: '45', priceF: '35' })], [])
+  assert.deepStrictEqual([...req.gameMissing({ title: '', desc: 'b' }, true)], ['标题'])
+  assert.deepStrictEqual([...req.productMissing({ name: '', images: [], price: '', stock: '3', fixedDate: true, activityDate: '', activityStartTime: '19:00' })], ['名称', '图片', '价格', '活动日期'])
+  assert.deepStrictEqual({ ...req.flags(['标题', '女价格']) }, { title: true, priceF: true })
+  // 頁面：按發布時不呼叫雲函數，提示全部沒填的項目並標紅
+  const calls = []
+  const page = loadPage('miniprogram/pages/admin/game-edit/index.js', { '/api': { call: async (...a) => calls.push(a), toast() {} }, '/money': money, '/required': req, '/image': {} })
+  page.data.title = '周五局'
+  page.submit()
+  assert.strictEqual(calls.length, 0)
+  assert.strictEqual(page.data.errText, '还有必填项没填：场地、详情说明、男价格、女价格。请填完再发布。')
+  assert.deepStrictEqual({ ...page.data.err }, { cells: true, desc: true, priceM: true, priceF: true })
+  const prod = loadPage('miniprogram/pages/admin/product-edit/index.js', { '/api': { call: async (...a) => calls.push(a), toast() {} }, '/money': money, '/required': req, '/image': {}, '/time': { now: () => BASE, beijingParts: () => ({ year: 2026, month: 11, day: 10 }), pad: n => String(n).padStart(2, '0') } })
+  prod.data.name = '畅打券'
+  prod.save()
+  assert.strictEqual(calls.length, 0)
+  assert.strictEqual(prod.data.errText, '还有必填项没填：图片、价格、库存。请填完再保存。')
+})
+
+test('N11 球局詳情頁：按鈕狀態、分享直達這場球局；球局已取消提示並帶到球局列表', async () => {
+  seedGamePeople()
+  const id = await publishGame('oO', { cap: 1 })
+  const money = { formatFen: f => `¥${(f / 100).toFixed(2)}` }
+  const share = loadUtil('utils/share.js', { wx: { getEnterOptionsSync: () => ({ scene: 1007 }) } })
+  const api = { toast: m => toasts.push(m), call: async (svc, action, x) => { const r = await call(svc === 'admin' ? admin : booking, 'oA', { action, ...x }); if (!r.ok) throw Object.assign(new Error(r.message), r); return r.data } }
+  const toasts = []
+  const tabs = []
+  const app = { globalData: {} }
+  const page = loadPage('miniprogram/pages/game/index.js', { '/api': api, '/checkout': {}, '/money': money, '/share': share, '/config': { LEGAL: { address: '泰兴路133号4楼' } } },
+    { wx: { switchTab: o => tabs.push(o.url), getEnterOptionsSync: () => ({ scene: 1007 }) }, getApp: () => app, setTimeout: fn => fn() })
+  page.onLoad({ id })
+  await page.load()
+  assert.strictEqual(page.data.g.button.text, '立即报名')
+  const sh = page.onShareAppMessage()
+  assert.strictEqual(sh.title, '周三晚 中级局 男¥45.00 女¥35.00')
+  assert(sh.path.startsWith(`/pages/game/index?id=${id}&`))
+  assert(page.onShareTimeline().query.startsWith(`id=${id}&`))
+  await joinGame('oB', id, 'F') // 名額滿了
+  await page.load()
+  assert.strictEqual(page.data.g.button.text, '候补报名')
+  await joinGame('oA', id, 'M')
+  await page.load()
+  assert.strictEqual(page.data.g.button.text, '候补第 1 位 · 查看订单')
+  must(await call(admin, 'oO', { action: 'gameCancel', id }))
+  must(await call(admin, 'oO', { action: 'gameCancel', id })) // 重複取消不出錯
+  await page.load()
+  assert.strictEqual(page.data.g.status, 'cancelled')
+  assert.strictEqual(page.data.g.button.text, '已取消') // 已全額退款、移出名單
+  // 球局記錄不存在時：提示並帶到球局列表
+  page.onLoad({ id: 'G_NONE' })
+  await page.load()
+  assert.deepStrictEqual(toasts, ['球局已取消'])
+  assert.deepStrictEqual(tabs, ['/pages/activity/index'])
+  assert.strictEqual(app.globalData.activityTab, 'game')
+})
+
+test('N12 活動頁「活动｜球局」標籤；組局員的管理後台選單只有球局管理', async () => {
+  seedGamePeople()
+  await publishGame('oO')
+  const api = { toast() {}, call: async (svc, action, x) => must(await call(booking, 'oA', { action, ...x })) }
+  const app = { globalData: { activityTab: 'game' } }
+  const page = loadPage('miniprogram/pages/activity/index.js', { '/api': api, '/cart': {}, '/money': { formatFen: f => `¥${(f / 100).toFixed(2)}` } }, { getApp: () => app })
+  page.onShow()
+  await new Promise(r => setTimeout(r, 30))
+  assert.strictEqual(page.data.tab, 'game')
+  assert.strictEqual(app.globalData.activityTab, '')
+  assert.strictEqual(page.data.games.length, 1)
+  assert.strictEqual(page.data.games[0].priceMText, '¥45.00')
+  page.switchTab({ currentTarget: { dataset: { tab: 'product' } } })
+  assert.strictEqual(page.data.tab, 'product')
+  const wxml = fs.readFileSync(path.join(ROOT, 'miniprogram/pages/activity/index.wxml'), 'utf8')
+  assert(/<cart-bar wx:if="\{\{tab === 'product'\}\}"/.test(wxml), '底部結算欄只在活动標籤顯示')
+  const menu = loadUtil('utils/admin-menu.js')
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(menu.filter(m => m.roles.includes('host')).map(m => m.key))), ['games'])
+  assert(menu.find(m => m.key === 'games').roles.includes('staff'))
+})
+
+test('N13 報名走同一結算流程：呼叫 gameJoin 並帶性別；隱私政策寫明性別和名單公開', async () => {
+  const calls = []
+  let def = null
+  const ctx = {
+    module: { exports: {} }, console,
+    wx: { showLoading() {}, hideLoading() {}, setStorageSync() {}, requestPayment: o => o.fail(), redirectTo: o => calls.push(['redirect', o.url]), showModal: o => o.success({ confirm: true }) },
+    getApp: () => ({ userReady: Promise.resolve(), globalData: { user: { phone: '138' } } }),
+    require: n => n.endsWith('/api') ? { call: async (svc, action, x) => { calls.push([action, x]); return { orderId: 'FX1', payment: {}, mock: false } }, toast() {} }
+      : n.endsWith('/privacy') ? { ensure: async () => true } : n.endsWith('/config') ? { TPL_TIMEOUT_REFUND: '' } : {}
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/utils/checkout.js'), 'utf8'), ctx)
+  const r = await ctx.module.exports.start({}, [], { action: 'gameJoin', params: { gameId: 'G1', gender: 'F' } })
+  assert.strictEqual(r.ok, true)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(calls[0])), ['gameJoin', { gameId: 'G1', gender: 'F' }])
+  assert.deepStrictEqual(calls[1], ['redirect', '/pages/order/pay/index?id=FX1'])
+  const legal = fs.readFileSync(path.join(ROOT, 'miniprogram/utils/legal.js'), 'utf8')
+  assert(legal.includes('性别（你自己选择）') && legal.includes('报名名单') && legal.includes('组局员'))
+  const cfg = fs.readFileSync(path.join(ROOT, 'miniprogram/config.js'), 'utf8')
+  assert(/PRIVACY_VERSION: '2026-11-17'/.test(cfg))
 })
 
 ;(async () => {

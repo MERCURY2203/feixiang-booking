@@ -1,0 +1,18 @@
+.label { font-size: 28rpx; color: var(--text-2); margin: 16rpx 0 10rpx; }
+.label.bad { color: var(--danger); font-weight: 600; }
+.star { color: var(--danger); }
+.field { height: 84rpx; line-height: 84rpx; border: 1rpx solid var(--border); border-radius: 12rpx; padding: 0 20rpx; }
+.area { width: 100%; height: 220rpx; border: 1rpx solid var(--border); border-radius: 12rpx; padding: 16rpx 20rpx; box-sizing: border-box; }
+.dates { white-space: nowrap; margin-bottom: 16rpx; }
+.date { display: inline-block; padding: 12rpx 20rpx; margin-right: 12rpx; border-radius: 12rpx; border: 1rpx solid var(--border); font-size: 26rpx; }
+.date.on { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.small { font-size: 24rpx; margin-top: 12rpx; }
+.sum { margin-top: 8rpx; color: var(--primary); font-weight: 600; font-size: 28rpx; }
+.imgs { display: flex; }
+.img-box { position: relative; }
+.img, .img-add { width: 240rpx; height: 180rpx; border-radius: 12rpx; }
+.img-add { border: 2rpx dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 60rpx; color: var(--text-2); }
+.img-del { position: absolute; top: -12rpx; right: -12rpx; width: 44rpx; height: 44rpx; line-height: 40rpx; text-align: center; border-radius: 50%; background: var(--danger); color: #FFFFFF; }
+.two { display: flex; gap: 24rpx; }
+.half { flex: 1; min-width: 0; }
+.errbox { background: #FDECEA; color: #B3261E; font-size: 28rpx; padding: 20rpx 24rpx; border-radius: 16rpx; margin-bottom: 24rpx; }

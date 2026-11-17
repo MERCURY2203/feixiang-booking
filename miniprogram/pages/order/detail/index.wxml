@@ -17,9 +17,10 @@
     <view wx:if="{{item.note}}" class="muted">{{item.note}}</view>
     <view wx:if="{{item.state}}" class="state">{{item.state}}</view>
     <view wx:if="{{item.hasCode}}" class="code-hint">点击查看券码</view>
+    <view wx:if="{{item.kind === 'game'}}" class="code-hint">点击查看球局</view>
     <view class="refund-wrap">
       <text wx:if="{{item.refundHint && !item.canRefund}}" class="refund-hint">{{item.refundHint}}</text>
-      <text class="refund {{item.canRefund ? '' : 'off'}}" data-index="{{index}}" catchtap="refund">退款</text>
+      <text class="refund {{item.canRefund ? '' : 'off'}}" data-index="{{index}}" catchtap="refund">{{item.kind === 'game' ? '退出球局' : '退款'}}</text>
     </view>
   </view>
 

@@ -3,11 +3,12 @@ const api = require('../../../utils/api')
 const { pickImages } = require('../../../utils/image')
 const { yuanToFen } = require('../../../utils/money')
 const { now, beijingParts, pad } = require('../../../utils/time')
+const req = require('../../../utils/required')
 
 Page({
   data: {
     id: '', name: '', images: [], price: '', stock: '', stockFrom: null, desc: '', fixedDate: false,
-    activityDate: '', activityStartTime: '', onShelf: true, soldCount: 0, today: ''
+    activityDate: '', activityStartTime: '', onShelf: true, soldCount: 0, today: '', err: {}, errText: ''
   },
 
   onLoad(options) {
@@ -29,7 +30,8 @@ Page({
   },
 
   input(e) {
-    this.setData({ [e.currentTarget.dataset.field]: e.detail.value })
+    const field = e.currentTarget.dataset.field
+    this.setData({ [field]: e.detail.value, [`err.${field}`]: false })
   },
 
   setType(e) {
@@ -52,7 +54,7 @@ Page({
           wx.cloud.uploadFile({ cloudPath: `products/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`, filePath: p }).then(r => r.fileID)
         )
       )
-        .then(ids => this.setData({ images: this.data.images.concat(ids) }))
+        .then(ids => this.setData({ images: this.data.images.concat(ids), 'err.images': false }))
         .catch(() => api.toast('上传失败，请重试'))
         .finally(() => wx.hideLoading())
     })
@@ -67,9 +69,11 @@ Page({
   save() {
     if (this.saving) return
     const d = this.data
+    // 有必填項沒填：一次列出全部、欄位名標紅，不保存（澄清 N16）
+    const miss = req.productMissing(d)
+    this.setData({ err: req.flags(miss), errText: miss.length ? `还有必填项没填：${miss.join('、')}。请填完再保存。` : '' })
+    if (miss.length) return
     const price = yuanToFen(d.price)
-    if (!price) return api.toast('请填写正确的价格（最多两位小数）')
-    if (!/^\d+$/.test(d.stock)) return api.toast('请填写正确的库存')
     this.saving = true
     api
       .call('admin', 'productSave', {

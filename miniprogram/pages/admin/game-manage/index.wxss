@@ -1,0 +1,18 @@
+.st { font-size: 26rpx; color: var(--primary); flex-shrink: 0; margin-left: 16rpx; }
+.stats { display: flex; gap: 16rpx; margin-top: 16rpx; }
+.stat { flex: 1; background: #F5F6F8; border-radius: 12rpx; padding: 12rpx 0; text-align: center; }
+.sv { font-size: 34rpx; font-weight: 600; }
+.sl { font-size: 24rpx; color: var(--text-2); }
+.small { font-size: 24rpx; }
+.empty { padding: 16rpx 0; }
+.pl { display: flex; align-items: center; gap: 20rpx; padding: 18rpx 0; border-bottom: 1rpx solid var(--border); }
+.av { width: 72rpx; height: 72rpx; border-radius: 50%; background: #D5DBE3; flex-shrink: 0; }
+.avimg { width: 72rpx; height: 72rpx; border-radius: 50%; }
+.pinfo { flex: 1; min-width: 0; font-size: 28rpx; }
+.gd { font-size: 22rpx; padding: 0 8rpx; border-radius: 6rpx; color: #FFFFFF; }
+.gd.m { background: var(--primary); }
+.gd.f { background: #D9486A; }
+.ps { font-size: 24rpx; color: var(--text-2); }
+.ops { display: flex; flex-direction: column; align-items: flex-end; gap: 8rpx; }
+.op { font-size: 24rpx; color: var(--primary); padding: 4rpx 0; }
+.op.danger { color: var(--danger); }

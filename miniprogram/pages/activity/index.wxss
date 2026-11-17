@@ -9,3 +9,22 @@
 .pbar { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 28rpx 24rpx; }
 .pprice { font-size: 38rpx; font-weight: 600; }
 .add { height: 72rpx; font-size: 28rpx; }
+
+/* 頂部「活动｜球局」標籤（澄清 N 節） */
+.tabs { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; justify-content: center; gap: 96rpx; background: #FFFFFF; border-bottom: 1rpx solid var(--border); }
+.tab { padding: 20rpx 12rpx 16rpx; font-size: 32rpx; color: var(--text-2); border-bottom: 6rpx solid transparent; }
+.tab.on { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); }
+.tabs-spacer { height: 92rpx; }
+
+/* 球局卡片：左邊 4:3 封面，右邊資料 */
+.gcard { display: flex; gap: 24rpx; background: #FFFFFF; border: 1rpx solid var(--border); border-radius: 20rpx; padding: 24rpx; margin-bottom: 24rpx; }
+.gcover { position: relative; width: 208rpx; height: 156rpx; flex-shrink: 0; border-radius: 12rpx; overflow: hidden; background: var(--primary-light); }
+.gimg { width: 100%; height: 100%; display: block; }
+.gtag { position: absolute; left: 0; top: 0; padding: 2rpx 12rpx; border-radius: 0 0 12rpx 0; background: rgba(0, 0, 0, 0.55); color: #FFFFFF; font-size: 22rpx; }
+.ginfo { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gtitle { font-size: 30rpx; font-weight: 600; line-height: 1.4; }
+.gsub { font-size: 24rpx; color: var(--text-2); margin-top: 6rpx; }
+.gfoot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12rpx; }
+.gcount { font-size: 24rpx; color: #4E8C17; }
+.gcount.full { color: #D46B08; }
+.gprice { font-size: 26rpx; color: var(--danger); font-weight: 600; white-space: nowrap; }

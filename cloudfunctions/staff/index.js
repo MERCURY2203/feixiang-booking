@@ -1,7 +1,7 @@
 // 員工與老闆綁定雲函數（規格書「老闆綁定」「員工管理」）
 //
 // 客人端可呼叫：redeemInvite
-// 僅老闆可呼叫：createInvite、listStaff、setRemark、removeStaff
+// 僅老闆可呼叫：createInvite（type：staff 員工／host 組局員，澄清 N1）、listStaff、setRemark、removeStaff
 // 僅開發者在雲開發控制台「雲端測試」可呼叫：createOwnerInvite（控制台呼叫時沒有 OPENID）
 const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
@@ -68,7 +68,7 @@ async function redeem(user, code) {
       return { error: INVALID }
     }
     if (!inv || inv.used || inv.expiresAt < now) return { error: INVALID }
-    if (inv.type === 'staff' && user.role === 'owner') return { error: '你已是老板，无需绑定员工身份' }
+    if ((inv.type === 'staff' || inv.type === 'host') && user.role === 'owner') return { error: '你已是老板，无需绑定员工身份' }
 
     await t.collection('invites').doc(code).update({ data: { used: true, usedBy: user._id, usedAt: now } })
     if (inv.type === 'owner') {
@@ -81,8 +81,10 @@ async function redeem(user, code) {
       await t.collection('settings').doc('owner').update({ data: { ownerId: user._id } })
       return { role: 'owner', type: inv.type }
     }
-    await t.collection('users').doc(user._id).update({ data: { role: 'staff', staffSince: now } })
-    return { role: 'staff', type: inv.type }
+    // 員工碼 → 員工；組局員碼 → 組局員（已是另一種身份的改為新身份）
+    const role = inv.type === 'host' ? 'host' : 'staff'
+    await t.collection('users').doc(user._id).update({ data: { role, staffSince: now } })
+    return { role, type: inv.type }
   })
   if (result.error) return fail(result.error, 'INVITE_INVALID')
   await audit(user._id, `bind_${result.type}`, { code })
@@ -114,26 +116,27 @@ exports.main = async event => {
 
     switch (event.action) {
       case 'createInvite': {
-        const inv = await makeInvite('staff', STAFF_TTL, caller._id)
-        await audit(caller._id, 'create_staff_invite', { code: inv.code })
+        const type = event.type === 'host' ? 'host' : 'staff'
+        const inv = await makeInvite(type, STAFF_TTL, caller._id)
+        await audit(caller._id, type === 'host' ? 'create_host_invite' : 'create_staff_invite', { code: inv.code })
         return ok(inv)
       }
 
       case 'listStaff': {
-        const res = await users.where({ role: 'staff' }).orderBy('staffSince', 'asc').limit(100).get()
+        const res = await users.where({ role: _.in(['staff', 'host']) }).orderBy('staffSince', 'asc').limit(100).get()
         return ok(res.data.map(u => ({ ...publicUser(u), remark: u.remark || '', staffSince: u.staffSince || u.createdAt })))
       }
 
       case 'setRemark': {
         const remark = String(event.remark || '').trim().slice(0, 20)
-        const res = await users.where({ _id: event.userId, role: 'staff' }).update({ data: { remark } })
+        const res = await users.where({ _id: event.userId, role: _.in(['staff', 'host']) }).update({ data: { remark } })
         if (!res.stats.updated && remark) return fail('该员工不存在')
         await audit(caller._id, 'set_staff_remark', { userId: event.userId, remark })
         return ok(true)
       }
 
       case 'removeStaff': {
-        const res = await users.where({ _id: event.userId, role: 'staff' }).update({ data: { role: 'customer', remark: '', removedAt: Date.now() } })
+        const res = await users.where({ _id: event.userId, role: _.in(['staff', 'host']) }).update({ data: { role: 'customer', remark: '', removedAt: Date.now() } })
         if (!res.stats.updated) return fail('该员工不存在或已被移除')
         await audit(caller._id, 'remove_staff', { userId: event.userId })
         return ok(true)

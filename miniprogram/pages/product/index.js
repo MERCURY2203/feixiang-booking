@@ -33,6 +33,7 @@ Page({
         }
         // 分享出去的活動已下架或刪除：提示後帶到活動列表（澄清 M4）
         api.toast(err.code === 'OFF_SHELF' ? '活动已下架' : err.message)
+        getApp().globalData.activityTab = 'product'
         setTimeout(() => wx.switchTab({ url: '/pages/activity/index' }), 1200)
       })
   },

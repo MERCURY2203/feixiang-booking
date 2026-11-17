@@ -1,0 +1,76 @@
+<view wx:if="{{g}}">
+  <view class="cover">
+    <image wx:if="{{g.cover}}" class="cimg" src="{{g.cover}}" mode="aspectFill" />
+    <view class="views">浏览 {{g.views}}</view>
+  </view>
+  <view class="container">
+    <view class="card">
+      <view class="title">{{g.title}}</view>
+      <view wx:if="{{g.tags.length}}" class="tags"><text wx:for="{{g.tags}}" wx:key="*this" class="tag">{{item}}</text></view>
+    </view>
+
+    <view class="card rows">
+      <view class="r"><text class="k">开始时间</text><view class="v">{{g.when}} · 共{{g.hours}}小时</view></view>
+      <view class="r"><text class="k">场地</text><view class="v">{{g.courtsText}}（已锁定）<view wx:if="{{address}}" class="sub">飞翔球馆 · {{address}}</view></view></view>
+      <view class="r"><text class="k">费用</text><view class="v price">男 {{g.priceMText}} · 女 {{g.priceFText}}</view></view>
+      <view class="r"><text class="k">可退时间</text><view class="v">{{g.quitBefore}} 之前<view class="sub">开局前 15 分钟之前可随时退出，原路退回</view></view></view>
+      <view wx:if="{{g.cap || g.capM || g.capF || g.minPlayers}}" class="r"><text class="k">人数</text><view class="v"><text wx:if="{{g.cap}}">总共最多{{g.cap}}人 </text><text wx:if="{{g.capM}}">· 男最多{{g.capM}} </text><text wx:if="{{g.capF}}">· 女最多{{g.capF}}</text><view wx:if="{{g.minPlayers}}" class="sub">最少 {{g.minPlayers}} 人开打</view></view></view>
+      <view class="r"><text class="k">说明</text><text class="v desc">{{g.desc}}</text></view>
+    </view>
+
+    <view class="card">
+      <view class="phead"><text class="card-title">已报名</text><text class="muted">{{g.joined}}{{g.cap ? '/' + g.cap : ''}}（{{g.M}}男 {{g.F}}女）· 候补 {{g.waitingCount}}</text></view>
+      <view wx:if="{{!g.players.length}}" class="muted empty">还没有人报名，快来第一个</view>
+      <view class="players">
+        <view wx:for="{{g.players}}" wx:key="index" class="pl">
+          <view class="av">
+            <image wx:if="{{item.avatar}}" class="avimg" src="{{item.avatar}}" mode="aspectFill" />
+            <text class="gd {{item.gender === 'F' ? 'f' : 'm'}}">{{item.gender === 'F' ? '女' : '男'}}</text>
+          </view>
+          <text class="nick">{{item.nick}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="notice">开局前 15 分钟之前可退出，全额原路退回<text wx:if="{{g.minPlayers}}">；不满 {{g.minPlayers}} 人开局前 2 小时自动取消并全额退款</text>。</view>
+    <view class="bottom-spacer"></view>
+  </view>
+
+  <view class="bottom-bar">
+    <view class="bprice"><view class="muted small">男 / 女</view><view class="pv">{{g.priceMText}} / {{g.priceFText}}</view></view>
+    <button class="btn {{g.button.off ? '' : 'btn-primary'}} main" disabled="{{g.button.off}}" bindtap="tapMain">{{g.button.text}}</button>
+  </view>
+
+  <view wx:if="{{sheet}}" class="mask" bindtap="closeSheet" catchtouchmove="noop">
+    <view class="panel" catchtap="noop">
+      <view class="card-title center">报名：{{g.title}}</view>
+      <view class="muted">{{g.myGender ? '你的性别' : '请选择你的性别（男女价格不同）'}}</view>
+      <view class="genders">
+        <view class="gbtn {{gender === 'M' ? 'on' : ''}} {{g.myGender && g.myGender !== 'M' ? 'dim' : ''}}" data-g="M" bindtap="pick">
+          <view class="gname">男</view><view class="gp">{{g.priceMText}}{{g.seatM ? '' : ' · 已满可候补'}}</view>
+        </view>
+        <view class="gbtn {{gender === 'F' ? 'on' : ''}} {{g.myGender && g.myGender !== 'F' ? 'dim' : ''}}" data-g="F" bindtap="pick">
+          <view class="gname">女</view><view class="gp">{{g.priceFText}}{{g.seatF ? '' : ' · 已满可候补'}}</view>
+        </view>
+      </view>
+      <view class="warn">{{g.myGender ? '性别已选定，如需修改请联系店员。' : '性别选定后会记在你的账号里，以后报名自动带出，不能自行修改；如需修改请联系店员。'}}</view>
+      <view class="muted small">· 开局前 15 分钟之前可退出，全额原路退回</view>
+      <view class="muted small">· 报名后你的头像、昵称和性别会显示在报名名单里</view>
+      <view wx:if="{{gender && (gender === 'F' ? !g.seatF : !g.seatM)}}" class="muted small">· 现在已满，报名后进入候补：有人退出会按顺序自动补上，开局还没补上自动全额退款</view>
+      <view class="pay">
+        <text class="muted">应付</text>
+        <text class="pv">{{gender === 'F' ? g.priceFText : gender === 'M' ? g.priceMText : '—'}}</text>
+        <button class="btn btn-primary paybtn" bindtap="confirm">确认并支付</button>
+      </view>
+    </view>
+  </view>
+</view>
+<view wx:if="{{!g && single}}" class="container">
+  <view class="card">
+    <view class="title">{{single.title}}</view>
+    <view wx:if="{{single.price}}" class="price">{{single.price}}</view>
+    <view class="muted">点击下方「前往小程序」查看详情并报名</view>
+  </view>
+</view>
+<phone-sheet id="phoneSheet" />
+<privacy-modal id="privacy" />

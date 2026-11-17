@@ -8,7 +8,12 @@ const _ = db.command
 const u = require('./lib/util')
 const cal = require('./lib/calendar')
 const ord = require('./lib/orders')
+const games = require('./lib/games')
+const gops = require('./lib/gameops')
 const { getCaller, isAdmin, isOwner, displayName } = require('./lib/auth')
+
+// 組局員（role host）只能用這些操作，且只能管自己發起的球局（澄清 N1）
+const HOST_ACTIONS = ['me', 'badges', 'courtSchedule', 'gameList', 'gameGet', 'gamePublish', 'gameUpdate', 'gameKick', 'gameCancel']
 
 const OWNER_ONLY = [
   'priceConfig', 'saveRegular', 'saveDaily', 'deleteDaily', 'pricePreview',
@@ -217,6 +222,10 @@ function adminItemView(order, it, now) {
     v.title = `${u.cnDate(it.date)} ${u.hourRange(it.hour)} ${it.court}号场`
     v.state = ord.courtFullyRefunded(it) ? '已退款' : it.refunding ? '退款中' : it.startAt + u.HOUR <= now ? '已使用' : it.startAt <= now ? '进行中' : '待使用'
     if (v.refundedFee > 0 && !ord.courtFullyRefunded(it)) v.state += ` · 已退 ${u.formatFen(v.refundedFee)}`
+  } else if (it.kind === 'game') {
+    v.title = `球局 · ${it.name}（${it.gender === 'F' ? '女' : '男'}）`
+    const refunded = ord.courtFullyRefunded(it)
+    v.state = refunded ? `${gops.OUT_REASON[it.gameOut] || '已退出'} · 已退款` : it.refunding ? '退款中' : it.endAt <= now ? '已结束' : '已报名'
   } else {
     v.title = `${it.name} ×${it.qty}`
     v.available = ord.productAvailable(it)
@@ -281,7 +290,7 @@ async function adminRefund(user, orderId, parts) {
     if (!it) return u.fail('退款项目不存在')
     const amount = Math.round(p.amount)
     if (!(amount > 0)) return u.fail('退款金额必须大于 0')
-    const qty = it.kind === 'court' ? 1 : Math.floor(Number(p.qty) || 0)
+    const qty = it.kind === 'product' ? Math.floor(Number(p.qty) || 0) : 1
     if (!(qty >= 0)) return u.fail('退款张数有误')
     if (it.kind === 'product' && qty > ord.productAvailable(it)) return u.fail('退款张数超过未使用张数')
     clean.push({ itemId: it._id, qty, amount })
@@ -295,6 +304,217 @@ async function adminRefund(user, orderId, parts) {
   }
   await audit(user, 'refund', { orderId, amount: r.amount })
   return u.ok({ amount: r.amount, processing: r.processing })
+}
+
+// ======================= 球局（澄清 N 節） =======================
+
+const GAME_TAGS = 4
+
+async function loadGame(user, id) {
+  const g = await ord.dget(db, 'games', String(id || ''))
+  if (!g) return { err: u.fail('球局不存在') }
+  if (user.role === 'host' && g.hostId !== user._id) return { err: u.fail('只能管理自己发起的球局', 'FORBIDDEN') }
+  return { g }
+}
+
+function cleanTags(tags) {
+  return (Array.isArray(tags) ? tags : String(tags || '').split(/[,，、\s]+/))
+    .map(t => String(t).trim().slice(0, 8)).filter(Boolean).slice(0, GAME_TAGS)
+}
+
+function optInt(v) {
+  if (v === '' || v === undefined || v === null) return 0
+  const n = Number(v)
+  return Number.isInteger(n) && n >= 0 ? n : NaN
+}
+
+// 必填項一次全部列出（澄清 N16）
+function gameMissing(g) {
+  const miss = []
+  if (!Array.isArray(g.cells) || !g.cells.length) miss.push('场地')
+  if (!String(g.title || '').trim()) miss.push('标题')
+  if (!String(g.desc || '').trim()) miss.push('详情说明')
+  if (!(Math.round(g.priceM) > 0)) miss.push('男价格')
+  if (!(Math.round(g.priceF) > 0)) miss.push('女价格')
+  return miss
+}
+
+async function gamePublish(user, g) {
+  const miss = gameMissing(g)
+  if (miss.length) return u.fail(`还有必填项没填：${miss.join('、')}`, 'MISSING', { missing: miss })
+  const date = String(g.date || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return u.fail('请选择日期')
+  const cap = optInt(g.cap)
+  const capM = optInt(g.capM)
+  const capF = optInt(g.capF)
+  const minPlayers = optInt(g.minPlayers)
+  if ([cap, capM, capF, minPlayers].some(Number.isNaN)) return u.fail('人数请填写整数')
+  if (cap && minPlayers > cap) return u.fail('最少人数不能大于总人数上限')
+  const seen = new Set()
+  const cells = []
+  for (const c of g.cells) {
+    const court = Number(c && c.court)
+    const hour = Number(c && c.hour)
+    if (!u.COURTS.includes(court) || !Number.isInteger(hour) || hour < 0 || hour > 23) return u.fail('格子有误')
+    const k = `${court}_${hour}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    cells.push({ court, hour })
+  }
+  if (cells.length > 30) return u.fail('一场球局最多锁 30 格')
+  const hours = [...new Set(cells.map(c => c.hour))].sort((a, b) => a - b)
+  if (hours[hours.length - 1] - hours[0] + 1 !== hours.length) return u.fail('所选时段要连续')
+  const now = Date.now()
+  const cfg = await cal.loadConfig(db)
+  if (!cal.bookableDays(cfg, now).includes(date)) return u.fail('该日期不可预订')
+  const h = cal.hoursFor(cfg, date)
+  if (!h || hours[0] < h.open || hours[hours.length - 1] >= h.close) return u.fail('所选时段不在营业时间内')
+  if (u.slotStart(date, hours[0]) <= now) return u.fail('所选时段已开始')
+
+  // 已過期的待支付佔用：先查單關單（與下單相同），確認沒付款才能鎖
+  const lockIds = cells.map(c => u.slotId(date, c.court, c.hour))
+  const res = await db.collection('slot_locks').where({ _id: _.in(lockIds) }).get()
+  for (const orderId of [...new Set(res.data.filter(l => l.status === 'pending' && l.expiresAt < now).map(l => l.orderId))]) {
+    const o = await ord.dget(db, 'orders', orderId)
+    if (o) await ord.settle(cloud, db, o)
+  }
+  const dayLock = await ord.dget(db, 'locks', `day_${date}`)
+  const hoursVer = (dayLock && dayLock.hoursVer) || 0
+
+  const game = {
+    title: String(g.title).trim().slice(0, 40), cover: typeof g.cover === 'string' && g.cover.startsWith('cloud://') ? g.cover : '',
+    tags: cleanTags(g.tags), desc: String(g.desc).trim().slice(0, 1000), date, cells,
+    startHour: hours[0], endHour: hours[hours.length - 1] + 1,
+    startAt: u.slotStart(date, hours[0]), endAt: u.slotStart(date, hours[hours.length - 1] + 1),
+    priceM: Math.round(g.priceM), priceF: Math.round(g.priceF), cap, capM, capF, minPlayers,
+    status: 'open', hostId: user._id, hostName: displayName(user), roster: [], views: 0, createdAt: now
+  }
+  let id = u.newId('G', 6)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await ord.tx(db, async t => {
+        if (await ord.tget(t, 'games', id)) return ord.rollbackWith(t, 'ID_TAKEN', '编号冲突')
+        const day = await ord.tget(t, 'locks', `day_${date}`)
+        if (((day && day.hoursVer) || 0) !== hoursVer) return ord.rollbackWith(t, 'TAKEN', '营业时间已调整，请刷新后重试')
+        for (const lid of lockIds) {
+          if (await ord.tget(t, 'slot_locks', lid)) return ord.rollbackWith(t, 'TAKEN', '部分格子刚被订走，请重新选择')
+        }
+        // 改寫日期鎖：和同時進行的「改營業時間」互斥（澄清 K2）
+        await t.collection('locks').doc(`day_${date}`).set({ data: { hoursVer, n: ((day && day.n) || 0) + 1, at: now } })
+        for (const c of cells) {
+          await t.collection('slot_locks').doc(u.slotId(date, c.court, c.hour)).set({ data: { date, court: c.court, hour: c.hour, status: 'game', gameId: id, orderId: '' } })
+        }
+        await t.collection('games').doc(id).set({ data: game })
+      })
+      break
+    } catch (e) {
+      if (e.business && e.code === 'ID_TAKEN') {
+        id = u.newId('G', 6)
+        continue
+      }
+      if (e.business) return u.fail(e.message, e.code)
+      throw e
+    }
+  }
+  await audit(user, 'game_publish', { id, date, cells: cells.length })
+  return u.ok({ _id: id })
+}
+
+function adminGameCard(g, now) {
+  const c = games.counts(g, now)
+  const status = g.status === 'cancelled' ? '已取消' : g.endAt <= now ? '已结束' : g.startAt <= now ? '进行中' : '报名中'
+  return {
+    _id: g._id, title: g.title, when: `${u.dateLabel(g.date)} ${u.pad(g.startHour)}:00–${u.pad(g.endHour)}:00`, courtsText: gops.cellsText(g),
+    count: `已报 ${c.joined}${g.cap ? `/${g.cap}` : ''}（${c.M}男${c.F}女）${c.waiting ? ` · 候补 ${c.waiting}` : ''}`,
+    host: g.hostName || '', status
+  }
+}
+
+async function gameList(user, tab) {
+  const now = Date.now()
+  const base = user.role === 'host' ? { hostId: user._id } : {}
+  const where = tab === 'ended'
+    ? _.and([base, _.or([{ status: 'cancelled' }, { endAt: _.lte(now) }])])
+    : { ...base, status: 'open', endAt: _.gt(now) }
+  const res = await db.collection('games').where(where).orderBy('startAt', tab === 'ended' ? 'desc' : 'asc').limit(50).get()
+  return u.ok(res.data.map(g => adminGameCard(g, now)))
+}
+
+async function gameGet(user, id) {
+  const { g, err } = await loadGame(user, id)
+  if (err) return err
+  const now = Date.now()
+  const c = games.counts(g, now)
+  const paidItems = await db.collection('order_items').where({ gameId: g._id, kind: 'game', status: _.in(['active', 'used']) }).limit(1000).get()
+  const income = paidItems.data.reduce((s, i) => s + i.price - (i.refundedFee || 0), 0)
+  const wait = (g.roster || []).filter(p => p.state === 'w').sort((a, b) => a.at - b.at)
+  const ids = (g.roster || []).map(p => p.userId)
+  const people = {}
+  for (let i = 0; i < ids.length; i += 100) {
+    const r = await db.collection('users').where({ _id: _.in(ids.slice(i, i + 100)) }).limit(100).get()
+    r.data.forEach(x => (people[x._id] = x))
+  }
+  const list = (g.roster || []).filter(p => games.live(p, now)).sort((a, b) => a.at - b.at).map(p => ({
+    userId: p.userId, itemId: p.itemId, nick: (people[p.userId] && people[p.userId].nickname) || '球友', avatar: (people[p.userId] && people[p.userId].avatar) || '', gender: p.gender,
+    userGender: (people[p.userId] && people[p.userId].gender) || '',
+    stateText: p.state === 'j' ? '已报名' : p.state === 'w' ? `候补第 ${wait.findIndex(x => x.userId === p.userId) + 1} 位` : '待支付',
+    paid: p.state === 'j' || p.state === 'w', time: `${u.dateStr(p.at).slice(5)} ${hm(p.at)}`,
+    price: p.gender === 'F' ? g.priceF : g.priceM
+  }))
+  return u.ok({
+    ...adminGameCard(g, now), cover: g.cover || '', tags: g.tags || [], desc: g.desc || '', priceM: g.priceM, priceF: g.priceF,
+    cap: g.cap || 0, capM: g.capM || 0, capF: g.capF || 0, minPlayers: g.minPlayers || 0,
+    joined: c.joined, M: c.M, F: c.F, waiting: c.waiting, income, list,
+    canCancel: g.status === 'open' && g.startAt > now, canKick: g.status === 'open' && g.endAt > now,
+    canEditGender: user.role !== 'host'
+  })
+}
+
+async function gameUpdate(user, id, p) {
+  const { g, err } = await loadGame(user, id)
+  if (err) return err
+  const miss = []
+  if (!String(p.title || '').trim()) miss.push('标题')
+  if (!String(p.desc || '').trim()) miss.push('详情说明')
+  if (miss.length) return u.fail(`还有必填项没填：${miss.join('、')}`, 'MISSING', { missing: miss })
+  const data = {
+    title: String(p.title).trim().slice(0, 40), desc: String(p.desc).trim().slice(0, 1000), tags: cleanTags(p.tags),
+    cover: typeof p.cover === 'string' && p.cover.startsWith('cloud://') ? p.cover : ''
+  }
+  await db.collection('games').doc(g._id).update({ data })
+  await audit(user, 'game_update', { id: g._id })
+  return u.ok(true)
+}
+
+async function gameKick(user, id, itemId) {
+  const { g, err } = await loadGame(user, id)
+  if (err) return err
+  if (g.status !== 'open' || g.endAt <= Date.now()) return u.fail('球局已结束或已取消')
+  const r = await gops.kick(cloud, db, g, String(itemId || ''), user)
+  if (r.ok) await audit(user, 'game_kick', { id: g._id, itemId })
+  return r
+}
+
+async function gameCancel(user, id) {
+  const { g, err } = await loadGame(user, id)
+  if (err) return err
+  try {
+    await gops.cancelGame(cloud, db, g._id, { by: 'admin', operatorId: user._id, reason: `${displayName(user)} 取消` })
+  } catch (e) {
+    if (e.business) return u.fail(e.message)
+    throw e
+  }
+  await audit(user, 'game_cancel', { id: g._id })
+  return u.ok(true)
+}
+
+// 店員改客人性別：只影響之後的報名（澄清 N7）
+async function setGender(user, userId, gender) {
+  if (gender !== 'M' && gender !== 'F') return u.fail('性别有误')
+  const res = await db.collection('users').where({ _id: String(userId || '') }).update({ data: { gender } })
+  if (!res.stats.updated) return u.fail('客人不存在')
+  await audit(user, 'set_gender', { userId, gender })
+  return u.ok(true)
 }
 
 // ======================= 場地管理（鎖場） =======================
@@ -315,7 +535,7 @@ async function courtSchedule(date) {
       const l = map[u.slotId(date, court, hour)]
       if (u.slotStart(date, hour) <= now) return { s: 'past' }
       if (!l || (l.status === 'pending' && l.expiresAt < now)) return { s: 'free' }
-      return { s: l.status === 'locked' ? 'locked' : l.status === 'pending' ? 'pending' : 'booked' }
+      return { s: l.status === 'locked' ? 'locked' : l.status === 'pending' ? 'pending' : l.status === 'game' ? 'game' : 'booked' }
     }))
   }
   return u.ok(out)
@@ -337,6 +557,7 @@ async function setLocks(user, date, cells, lock) {
       const r = await db.runTransaction(async t => {
         const l = await ord.tget(t, 'slot_locks', id)
         if (l && l.status === 'locked') return null
+        if (l && l.status === 'game') return '该时段已被球局锁定'
         if (l && l.status === 'booked') return '该时段已有订单，请先退款再锁定'
         if (l && l.status === 'pending') return '该时段有待支付订单，请稍后再试'
         await t.collection('slot_locks').doc(id).set({ data: { date, court: +c.court, hour: +c.hour, status: 'locked', orderId: '', lockedBy: user._id, lockedAt: now } })
@@ -697,9 +918,9 @@ async function hoursConfig() {
 // 縮短營業時間時，被縮掉的時段已有訂單 → 不允許保存；open 為 null 表示全天休息
 async function ordersOutside(dates, open, close) {
   const now = Date.now()
-  const locks = await cal.getAll(db.collection('slot_locks'), { date: dates[0], status: _.in(['booked', 'pending']) })
+  const locks = await cal.getAll(db.collection('slot_locks'), { date: dates[0], status: _.in(['booked', 'pending', 'game']) })
   return locks
-    .filter(l => (l.status === 'booked' || l.expiresAt > now) && (open === null || l.hour < open || l.hour >= close))
+    .filter(l => (l.status !== 'pending' || l.expiresAt > now) && (open === null || l.hour < open || l.hour >= close))
     .map(l => `${u.cnDate(l.date)} ${u.hourRange(l.hour)} ${l.court}号场`)
 }
 
@@ -753,10 +974,10 @@ async function saveDailyHours(user, { open, close, effectiveFrom }) {
 
 async function ordersOutsideRange(from, open, close, cfg) {
   const now = Date.now()
-  const locks = await cal.getAll(db.collection('slot_locks'), { date: _.gte(from), status: _.in(['booked', 'pending']) })
+  const locks = await cal.getAll(db.collection('slot_locks'), { date: _.gte(from), status: _.in(['booked', 'pending', 'game']) })
   return locks
     .filter(l => !cfg.special[l.date])
-    .filter(l => (l.status === 'booked' || l.expiresAt > now) && (l.hour < open || l.hour >= close))
+    .filter(l => (l.status !== 'pending' || l.expiresAt > now) && (l.hour < open || l.hour >= close))
     .map(l => `${u.cnDate(l.date)} ${u.hourRange(l.hour)} ${l.court}号场`)
 }
 
@@ -904,14 +1125,32 @@ exports.main = async event => {
   if (!OPENID) return u.fail('请在小程序内使用', 'NO_OPENID')
   try {
     const user = await getCaller(db, OPENID)
-    if (!isAdmin(user)) return u.fail('无权限', 'FORBIDDEN')
+    if (user && user.role === 'host') {
+      if (!HOST_ACTIONS.includes(event.action)) return u.fail('无权限', 'FORBIDDEN')
+    } else if (!isAdmin(user)) return u.fail('无权限', 'FORBIDDEN')
     if (OWNER_ONLY.includes(event.action) && !isOwner(user)) return u.fail('只有老板可以操作', 'FORBIDDEN')
 
     switch (event.action) {
       case 'me':
         return u.ok({ role: user.role, name: displayName(user) })
       case 'badges':
+        if (user.role === 'host') return u.ok({ orders: 0 })
         return await badges(user)
+
+      case 'gameList':
+        return await gameList(user, event.tab)
+      case 'gameGet':
+        return await gameGet(user, event.id)
+      case 'gamePublish':
+        return await gamePublish(user, event.game || {})
+      case 'gameUpdate':
+        return await gameUpdate(user, event.id, event.game || {})
+      case 'gameKick':
+        return await gameKick(user, event.id, event.itemId)
+      case 'gameCancel':
+        return await gameCancel(user, event.id)
+      case 'setGender':
+        return await setGender(user, event.userId, event.gender)
       case 'markSeen':
         await db.collection('users').doc(user._id).update({ data: { noticeSeenAt: Date.now() } })
         return u.ok(true)

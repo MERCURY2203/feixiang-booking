@@ -1,6 +1,12 @@
-<view class="container">
+<view class="tabs">
+  <view class="tab {{tab === 'product' ? 'on' : ''}}" data-tab="product" bindtap="switchTab">活动</view>
+  <view class="tab {{tab === 'game' ? 'on' : ''}}" data-tab="game" bindtap="switchTab">球局</view>
+</view>
+<view class="tabs-spacer"></view>
+
+<view wx:if="{{tab === 'product'}}" class="container">
   <view wx:if="{{single}}" class="placeholder">点击下方「前往小程序」查看活动并购买</view>
-<view wx:elif="{{loaded && !list.length}}" class="placeholder">暂无活动，敬请期待</view>
+  <view wx:elif="{{loaded && !list.length}}" class="placeholder">暂无活动，敬请期待</view>
   <view wx:for="{{list}}" wx:key="_id" class="pcard" data-index="{{index}}" bindtap="open">
     <view class="pimg-box">
       <image class="pimg" src="{{item.image}}" mode="aspectFill" />
@@ -15,5 +21,25 @@
   </view>
   <view class="bottom-spacer"></view>
 </view>
-<cart-bar id="cartBar" mode="activity" />
+
+<view wx:else class="container">
+  <view wx:if="{{single}}" class="placeholder">点击下方「前往小程序」查看球局并报名</view>
+  <view wx:elif="{{gamesLoaded && !games.length}}" class="placeholder">暂无球局，敬请期待</view>
+  <view wx:for="{{games}}" wx:key="_id" class="gcard" data-index="{{index}}" bindtap="openGame">
+    <view class="gcover">
+      <image wx:if="{{item.cover}}" class="gimg" src="{{item.cover}}" mode="aspectFill" />
+      <view class="gtag">{{item.timeTag}}</view>
+    </view>
+    <view class="ginfo">
+      <view class="gtitle">{{item.title}}</view>
+      <view class="gsub">{{item.courtsText}}</view>
+      <view class="gfoot">
+        <text class="gcount {{item.full ? 'full' : ''}}">{{item.count}}</text>
+        <text class="gprice">男{{item.priceMText}} 女{{item.priceFText}}</text>
+      </view>
+    </view>
+  </view>
+</view>
+
+<cart-bar wx:if="{{tab === 'product'}}" id="cartBar" mode="activity" />
 <privacy-modal id="privacy" />

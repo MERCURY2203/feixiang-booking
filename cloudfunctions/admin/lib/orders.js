@@ -12,6 +12,7 @@
 const https = require('https')
 const u = require('./util')
 const pay = require('./pay')
+const games = require('./games')
 
 const FINAL = ['cancelled', 'closed', 'timeout_refunded']
 const MAX_REFUNDS = 50
@@ -162,10 +163,13 @@ function productExpired(item, now) {
 function computeStatus(order, items, now) {
   if (order.status === 'pending' || FINAL.includes(order.status)) return order.status
   if (!items.length) return order.status // 讀不到卡片時不改狀態
-  const allRefunded = items.every(i => (i.kind === 'court' ? courtFullyRefunded(i) : (i.refundedQty || 0) >= i.qty))
+  // 場地和球局卡片按金額算「退完」；商品按張數
+  const allRefunded = items.every(i => (i.kind === 'product' ? (i.refundedQty || 0) >= i.qty : courtFullyRefunded(i)))
   if (allRefunded) return 'refunded'
   const done = items.every(i =>
-    i.kind === 'court' ? courtFullyRefunded(i) || i.startAt + u.HOUR <= now : productAvailable(i) <= 0 && !i.refunding
+    i.kind === 'court' ? courtFullyRefunded(i) || i.startAt + u.HOUR <= now
+      : i.kind === 'game' ? courtFullyRefunded(i) || (i.endAt <= now && !i.refunding && !i.gameOut)
+        : productAvailable(i) <= 0 && !i.refunding
   )
   return done ? 'completed' : 'active'
 }
@@ -193,6 +197,11 @@ async function planRelease(t, order, items) {
       const id = u.slotId(it.date, it.court, it.hour)
       const lock = await tget(t, 'slot_locks', id)
       if (lock && lock.orderId === order._id) ops.push({ type: 'unlock', id })
+    } else if (it.kind === 'game') {
+      // 待支付的報名從名單移除，空出的名額補給候補
+      const g = await tget(t, 'games', it.gameId)
+      const p = g && (g.roster || []).find(x => x.itemId === it._id)
+      if (p && (p.state === 'pj' || p.state === 'pw')) ops.push({ type: 'roster', id: g._id, roster: games.removeItem(g, it._id, Date.now()) })
     } else {
       const p = await tget(t, 'products', it.productId)
       if (p) ops.push({ type: 'stock', id: p._id, stock: (p.stock || 0) + it.qty, soldCount: Math.max(0, (p.soldCount || 0) - it.qty) })
@@ -210,6 +219,7 @@ async function applyRelease(t, ops) {
     if (op.type === 'unlock') await t.collection('slot_locks').doc(op.id).remove()
     else if (op.type === 'stock') await t.collection('products').doc(op.id).update({ data: { stock: op.stock, soldCount: op.soldCount } })
     else if (op.type === 'uncode') await t.collection('coupon_codes').doc(op.id).remove()
+    else if (op.type === 'roster') await t.collection('games').doc(op.id).update({ data: { roster: op.roster } })
   }
 }
 
@@ -251,7 +261,20 @@ async function markPaid(cloud, db, orderId, payTime) {
         if (!lock || lock.orderId !== order._id) allOwned = false
         else locks.push(lock)
       }
+      // 球局報名：要仍在名單上、球局沒取消、還沒開始，才算成立
+      const gameWrites = []
+      for (const it of items.filter(i => i.kind === 'game')) {
+        const g = await tget(t, 'games', it.gameId)
+        const p = g && (g.roster || []).find(x => x.itemId === it._id)
+        if (!g || g.status !== 'open' || g.startAt <= Date.now() || !p || (p.state !== 'pj' && p.state !== 'pw')) {
+          allOwned = false
+          continue
+        }
+        const roster = g.roster.map(x => (x.itemId === it._id ? { ...x, state: x.state === 'pj' ? 'j' : 'w', expiresAt: 0 } : x))
+        gameWrites.push({ id: g._id, roster: games.promote({ ...g, roster }, Date.now()).roster })
+      }
       if (allOwned) {
+        for (const w of gameWrites) await t.collection('games').doc(w.id).update({ data: { roster: w.roster } })
         for (const l of locks) await t.collection('slot_locks').doc(l._id).update({ data: { status: 'booked' } })
         for (const it of items) await t.collection('order_items').doc(it._id).update({ data: { status: 'active' } })
         const data = { status: 'active', payTime }
@@ -281,7 +304,7 @@ async function markPaid(cloud, db, orderId, payTime) {
     const order = r.order
     await db.collection('users').doc(order.userId).update({ data: { lastBookedAt: payTime } }).catch(() => {})
     const summary = r.items
-      .map(i => (i.kind === 'court' ? `${u.cnDate(i.date)} ${u.hourRange(i.hour)} ${i.court}号场` : `${i.name} ×${i.qty}`))
+      .map(i => (i.kind === 'court' ? `${u.cnDate(i.date)} ${u.hourRange(i.hour)} ${i.court}号场` : i.kind === 'game' ? `球局：${i.name}（${i.gender === 'F' ? '女' : '男'}）` : `${i.name} ×${i.qty}`))
       .join('；')
     await notify(db, 'order', `【新订单】${u.formatFen(order.totalFee)}\n${summary}\n客人：${u.maskPhone(order.phone)}\n订单号：${order._id}`, order._id)
     return order
@@ -447,6 +470,14 @@ async function finalizeRefund(db, outRefundNo) {
           const lock = await tget(t, 'slot_locks', lockId)
           if (lock && lock.orderId === order._id) extra.unlock = lockId
         }
+      } else if (it.kind === 'game') {
+        // 球局報名退完：從名單移除，空位補給候補（退出、移出、取消、候補未補上都走這裡）
+        if (data.refundedFee >= it.price) {
+          data.status = 'refunded'
+          const g = await tget(t, 'games', it.gameId)
+          const roster = g && games.removeItem(g, it._id, now)
+          if (roster) extra.roster = { id: g._id, roster }
+        }
       } else if (p.qty > 0) {
         if (r.asExpired) data.expiredQty = (it.expiredQty || 0) + p.qty
         else {
@@ -467,6 +498,7 @@ async function finalizeRefund(db, outRefundNo) {
       await t.collection('order_items').doc(x.id).update({ data: x.data })
       if (x.extra.unlock) await t.collection('slot_locks').doc(x.extra.unlock).remove()
       if (x.extra.stock) await t.collection('products').doc(x.extra.stock.id).update({ data: { stock: x.extra.stock.stock } })
+      if (x.extra.roster) await t.collection('games').doc(x.extra.roster.id).update({ data: { roster: x.extra.roster.roster } })
     }
     const updatedOrder = { ...order, refundedFee: (order.refundedFee || 0) + settled }
     updatedOrder.status = computeStatus(updatedOrder, Object.values(byId), now)

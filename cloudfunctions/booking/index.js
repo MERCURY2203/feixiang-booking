@@ -8,6 +8,8 @@ const u = require('./lib/util')
 const cal = require('./lib/calendar')
 const pay = require('./lib/pay')
 const ord = require('./lib/orders')
+const games = require('./lib/games')
+const gops = require('./lib/gameops')
 const { getCaller } = require('./lib/auth')
 
 const PENDING_MS = 5 * 60 * 1000 // 待支付 5 分鐘
@@ -336,9 +338,149 @@ async function checkout(user, rawItems, expectTotal) {
   return u.ok({ orderId: order._id, payment, mock: pay.MOCK, expiresAt: order.expiresAt, serverNow: Date.now() })
 }
 
+// ---------- 球局（澄清 N 節） ----------
+
+function gameWhen(g) {
+  return `${u.cnDate(g.date)} ${u.WEEK[u.weekday(g.date)]} ${u.pad(g.startHour)}:00–${u.pad(g.endHour)}:00`
+}
+
+function gameCard(g, now) {
+  const c = games.counts(g, now)
+  const full = !games.canSeat(g, 'M', now) && !games.canSeat(g, 'F', now)
+  let count = g.cap ? `已报 ${c.joined}/${g.cap}（${c.M}男${c.F}女）` : `已报 ${c.joined} 人（${c.M}男${c.F}女）`
+  if (full) count = `已满 ${c.joined}${g.cap ? `/${g.cap}` : ''} · 可候补`
+  else if (g.minPlayers && c.joined < g.minPlayers) count += ` · 满${g.minPlayers}人开打`
+  return {
+    _id: g._id, title: g.title, cover: g.cover || '', tags: g.tags || [],
+    timeTag: `${u.cnDate(g.date)} ${u.pad(g.startHour)}:00`, courtsText: gops.cellsText(g),
+    priceM: g.priceM, priceF: g.priceF, count, full, waiting: c.waiting
+  }
+}
+
+async function gameList() {
+  const now = Date.now()
+  const res = await db.collection('games').where({ status: 'open', startAt: _.gt(now) }).orderBy('startAt', 'asc').limit(50).get()
+  return res.data.map(g => gameCard(g, now))
+}
+
+async function gameDetail(id, openid) {
+  const g = await ord.dget(db, 'games', String(id || ''))
+  if (!g) return u.fail('球局不存在', 'GAME_GONE')
+  await db.collection('games').doc(g._id).update({ data: { views: _.inc(1) } }).catch(() => {})
+  const now = Date.now()
+  const c = games.counts(g, now)
+  const me = openid ? await getCaller(db, openid) : null
+  const mine = me && (g.roster || []).find(p => p.userId === me._id && games.live(p, now))
+  // 頭像暱稱讀帳號上現在的（客人改了、刪了、註銷了，名單跟著變）
+  const people = await loadByIds('users', (g.roster || []).filter(p => p.state === 'j').map(p => p.userId))
+  let status = g.status === 'cancelled' ? 'cancelled' : g.startAt <= now ? 'started' : 'open'
+  const view = {
+    ...gameCard(g, now), status, desc: g.desc || '', when: gameWhen(g), hours: g.endHour - g.startHour,
+    quitBefore: `${u.cnDate(g.date)} ${new Date(g.startAt - games.QUIT_BEFORE + 8 * u.HOUR).toISOString().slice(11, 16)}`,
+    cap: g.cap || 0, capM: g.capM || 0, capF: g.capF || 0, minPlayers: g.minPlayers || 0,
+    views: (g.views || 0) + 1, joined: c.joined, M: c.M, F: c.F, waitingCount: c.waiting,
+    // 名單只公開頭像、暱稱、性別（澄清 N17）
+    players: (g.roster || []).filter(p => p.state === 'j').sort((a, b) => a.at - b.at)
+      .map(p => ({ nick: (people[p.userId] && people[p.userId].nickname) || '球友', avatar: (people[p.userId] && people[p.userId].avatar) || '', gender: p.gender })),
+    seatM: games.canSeat(g, 'M', now), seatF: games.canSeat(g, 'F', now),
+    myGender: (me && me.gender) || '',
+    mine: mine ? { state: mine.state, rank: mine.state === 'w' ? games.waitRank(g, me._id) : 0, orderId: mine.orderId } : null
+  }
+  return u.ok(view)
+}
+
+async function gameJoin(user, gameId, gender) {
+  if (!user.phone) return u.fail('必须授权手机号才可下单购买哦', 'NEED_PHONE')
+  // 性別第一次報名時選定，之後以帳號上的為準，不能自行修改（澄清 N7）
+  if (!user.gender) {
+    if (gender !== 'M' && gender !== 'F') return u.fail('请选择性别', 'NEED_GENDER')
+    await db.collection('users').doc(user._id).update({ data: { gender } })
+    user = { ...user, gender }
+  }
+  const g0 = await ord.dget(db, 'games', String(gameId || ''))
+  if (!g0 || g0.status !== 'open') return u.fail('球局已取消', 'GAME_GONE')
+  if (g0.startAt <= Date.now()) return u.fail('球局已开始，不能报名')
+
+  // 同一客人同時只能有一張待支付訂單（與下單相同）
+  const pend = await db.collection('orders').where({ userId: user._id, status: 'pending' }).limit(10).get()
+  for (const o of pend.data) {
+    const s = await ord.settle(cloud, db, o)
+    if (s.status === 'pending') return u.fail('你有一笔待支付订单', 'HAS_PENDING', { orderId: o._id })
+  }
+
+  const price = user.gender === 'F' ? g0.priceF : g0.priceM
+  const created = Date.now()
+  const order = {
+    _id: u.newId('FX', 8), userId: user._id, openid: user.openid, phone: user.phone, status: 'pending',
+    totalFee: price, createdAt: created, expiresAt: created + PENDING_MS, hasCourt: false, hasGame: true,
+    refundedFee: 0, refundCount: 0, itemIds: [],
+    lines: [{ kind: 'product', title: `球局 · ${g0.title}`, n: 1, fee: price }],
+    summary: `球局：${g0.title}`
+  }
+  const item = {
+    orderId: order._id, userId: user._id, kind: 'game', gameId: g0._id, name: g0.title, gender: user.gender,
+    when: gameWhen(g0), startAt: g0.startAt, endAt: g0.endAt, price, qty: 1, refundedFee: 0, status: 'pending'
+  }
+  if (!(price > 0)) return u.fail('球局价格有误')
+  let state = ''
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const itemId = `${order._id}_1`
+    order.itemIds = [itemId]
+    try {
+      state = await ord.tx(db, async t => {
+        if (await ord.tget(t, 'orders', order._id)) return ord.rollbackWith(t, 'ID_TAKEN', '订单号冲突')
+        const g = await ord.tget(t, 'games', g0._id)
+        const now = Date.now()
+        if (!g || g.status !== 'open') return ord.rollbackWith(t, 'GAME_GONE', '球局已取消')
+        if (g.startAt <= now) return ord.rollbackWith(t, 'STARTED', '球局已开始，不能报名')
+        if ((g.roster || []).some(p => p.userId === user._id && games.live(p, now))) return ord.rollbackWith(t, 'JOINED', '你已报名这场球局')
+        const claim = await ord.tget(t, 'user_pending', user._id)
+        if (claim && claim.orderId) {
+          const prev = await ord.tget(t, 'orders', claim.orderId)
+          if (prev && prev.status === 'pending') return ord.rollbackWith(t, 'HAS_PENDING', '你有一笔待支付订单', { orderId: prev._id })
+        }
+        const seat = games.canSeat(g, user.gender, now, user._id)
+        const entry = {
+          userId: user._id, gender: user.gender, state: seat ? 'pj' : 'pw', orderId: order._id, itemId,
+          at: now, expiresAt: order.expiresAt
+        }
+        // 同一人之前已失效的記錄（例如待支付過期還沒清掉）換成這次的
+        const roster = (g.roster || []).filter(p => p.userId !== user._id).concat([entry])
+        await t.collection('games').doc(g._id).update({ data: { roster } })
+        await t.collection('user_pending').doc(user._id).set({ data: { orderId: order._id, at: created } })
+        await t.collection('order_items').doc(itemId).set({ data: item })
+        const { _id, ...orderData } = order
+        await t.collection('orders').doc(_id).set({ data: orderData })
+        return entry.state
+      })
+      break
+    } catch (e) {
+      if (e.code === 'ID_TAKEN') {
+        order._id = u.newId('FX', 8)
+        item.orderId = order._id
+        continue
+      }
+      if (e.business) return u.fail(e.message, e.code, { orderId: e.orderId })
+      console.error('gameJoin tx', e)
+      return u.fail('报名失败，请重试')
+    }
+  }
+  if (!state) return u.fail('报名失败，请重试')
+  let payment
+  try {
+    payment = await pay.unifiedOrder(cloud, order, '飞翔球馆-球局')
+    await db.collection('orders').doc(order._id).update({ data: { payment } })
+  } catch (e) {
+    console.error('unifiedOrder', e)
+    await ord.closePending(db, order._id, 'cancelled')
+    return u.fail(/未配置/.test(e.message) ? e.message : '发起支付失败，请重试')
+  }
+  return u.ok({ orderId: order._id, payment, mock: pay.MOCK, expiresAt: order.expiresAt, serverNow: Date.now(), waiting: state === 'pw' })
+}
+
 // ---------- 訂單展示 ----------
 
-function itemView(order, it, now, admin) {
+function itemView(order, it, now, admin, opts) {
   const v = { _id: it._id, kind: it.kind, price: it.price, qty: it.qty, refundedFee: it.refundedFee || 0 }
   const tooManyRefunds = (order.refundCount || 0) >= REFUND_WARN
   const paidish = ['active', 'completed'].includes(order.status)
@@ -349,6 +491,22 @@ function itemView(order, it, now, admin) {
     v.refundable = ord.itemRefundable(it)
     v.canRefund = paidish && !refunded && it.startAt - CANCEL_BEFORE > now && !it.refunding
     v.refundHint = refunded ? '已退款' : it.refunding ? '退款处理中，请稍候' : paidish && it.startAt - CANCEL_BEFORE <= now ? '已过可退时间' : ''
+  } else if (it.kind === 'game') {
+    const g = (opts && opts.games && opts.games[it.gameId]) || null
+    v.title = `球局 · ${it.name}`
+    v.note = `${it.when || ''} · ${it.gender === 'F' ? '女' : '男'}`
+    const refunded = ord.courtFullyRefunded(it)
+    const p = g && (g.roster || []).find(x => x.itemId === it._id)
+    if (refunded) v.state = it.gameOut ? `${gops.OUT_REASON[it.gameOut]} · 已退款` : '已退出 · 已退款'
+    else if (!paidish) v.state = ''
+    else if (it.refunding) v.state = '退款中'
+    else if (it.gameOut) v.state = `${gops.OUT_REASON[it.gameOut]} · 退款处理中`
+    else if (p && p.state === 'w') v.state = `候补第 ${games.waitRank(g, it.userId)} 位`
+    else v.state = it.endAt <= now ? '已结束' : it.startAt <= now ? '进行中' : '已报名'
+    v.refundable = ord.itemRefundable(it)
+    v.canRefund = paidish && !refunded && !it.refunding && !it.gameOut && it.startAt - games.QUIT_BEFORE > now
+    v.refundHint = refunded ? '' : it.refunding || it.gameOut ? '退款处理中，请稍候' : paidish && it.startAt - games.QUIT_BEFORE <= now ? '已过可退时间' : ''
+    v.gameId = it.gameId
   } else {
     v.title = `${it.name} ×${it.qty}`
     v.image = it.image
@@ -435,9 +593,10 @@ async function orderDetail(user, orderId) {
   else if (order.status === 'active') order = await ord.refreshStatus(db, order._id)
   const items = (await ord.getItems(db, orderId)).sort((a, b) => (a._id < b._id ? -1 : 1))
   const now = Date.now()
+  const gameMap = await loadByIds('games', [...new Set(items.filter(i => i.kind === 'game').map(i => i.gameId))])
   return u.ok({
     order: orderView(order, items.some(it => it.refunding)),
-    items: items.map(it => itemView(order, it, now, false)),
+    items: items.map(it => itemView(order, it, now, false, { games: gameMap })),
     hasCourt: order.hasCourt,
     serverNow: now
   })
@@ -477,6 +636,10 @@ exports.main = async event => {
             })
         )
       }
+      case 'games':
+        return u.ok(await gameList())
+      case 'game':
+        return await gameDetail(event.id, OPENID)
       case 'product': {
         const p = (await db.collection('products').doc(event.id).get().catch(() => ({ data: null }))).data
         if (!p || !p.onShelf) return u.fail('商品已下架', 'OFF_SHELF')
@@ -495,6 +658,8 @@ exports.main = async event => {
     switch (event.action) {
       case 'checkout':
         return await checkout(user, event.items, event.expectTotal)
+      case 'gameJoin':
+        return await gameJoin(user, event.gameId, event.gender)
 
       case 'orderStatus': {
         let o = await loadOwnOrder(user, event.orderId)
@@ -515,7 +680,7 @@ exports.main = async event => {
         const items = (await ord.getItems(db, o._id)).sort((a, b) => (a._id < b._id ? -1 : 1))
         return u.ok({
           order: orderView(o),
-          items: items.map(it => ({ title: it.kind === 'court' ? `${u.cnDate(it.date)} ${u.hourRange(it.hour)} ${it.court}号场` : `${it.name} ×${it.qty}`, amount: it.price * it.qty })),
+          items: items.map(it => ({ title: it.kind === 'court' ? `${u.cnDate(it.date)} ${u.hourRange(it.hour)} ${it.court}号场` : it.kind === 'game' ? `球局 · ${it.name}（${it.gender === 'F' ? '女' : '男'}）` : `${it.name} ×${it.qty}`, amount: it.price * it.qty })),
           serverNow: Date.now()
         })
       }
@@ -556,7 +721,8 @@ exports.main = async event => {
         if ((o.refundCount || 0) >= REFUND_WARN) return u.fail('请联系球馆退款')
         const it = (await db.collection('order_items').doc(event.itemId).get().catch(() => ({ data: null }))).data
         if (!it || it.orderId !== o._id) return u.fail('退款项目不存在')
-        const view = itemView(o, it, Date.now(), false)
+        const gm = it.kind === 'game' ? await loadByIds('games', [it.gameId]) : {}
+        const view = itemView(o, it, Date.now(), false, { games: gm })
         if (!view.canRefund) return u.fail(view.refundHint || '该项不能退款')
         let qty = 1
         let amount = view.refundable

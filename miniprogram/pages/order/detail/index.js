@@ -34,6 +34,10 @@ Page({
 
   openCoupon(e) {
     const it = this.data.items[e.currentTarget.dataset.index]
+    if (it.kind === 'game') {
+      wx.navigateTo({ url: `/pages/game/index?id=${it.gameId}` })
+      return
+    }
     if (it.kind !== 'product' || !it.hasCode) return
     wx.showLoading({ title: '加载中' })
     api
@@ -87,8 +91,8 @@ Page({
 
   confirmRefund(it, qty, amount) {
     wx.showModal({
-      title: '确认退款',
-      content: `将退款 ${formatFen(amount)}，原路退回`,
+      title: it.kind === 'game' ? '确认退出球局' : '确认退款',
+      content: it.kind === 'game' ? `退出后 ${formatFen(amount)} 全额原路退回，名额会让给候补的人` : `将退款 ${formatFen(amount)}，原路退回`,
       confirmText: '确认',
       cancelText: '取消',
       success: res => {

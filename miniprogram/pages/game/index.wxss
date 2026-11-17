@@ -1,0 +1,44 @@
+/* 球局詳情：封面 4:3 → 卡片 → 名單 → 底部報名欄（規格書「球局」） */
+.cover { position: relative; height: 562rpx; background: var(--primary-light); }
+.cimg { width: 100%; height: 562rpx; display: block; }
+.views { position: absolute; left: 24rpx; bottom: 24rpx; padding: 4rpx 18rpx; border-radius: 24rpx; background: rgba(0, 0, 0, 0.5); color: #FFFFFF; font-size: 24rpx; }
+.title { font-size: 36rpx; font-weight: 600; line-height: 1.5; }
+.tags { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 16rpx; }
+.tag { padding: 4rpx 18rpx; border-radius: 24rpx; background: var(--primary-light); color: var(--primary); font-size: 24rpx; }
+.rows { padding-top: 8rpx; padding-bottom: 8rpx; }
+.r { display: flex; gap: 24rpx; padding: 20rpx 0; border-bottom: 1rpx solid var(--border); }
+.r:last-child { border-bottom: none; }
+.k { width: 128rpx; flex-shrink: 0; color: var(--text-2); font-size: 28rpx; }
+.v { flex: 1; font-size: 28rpx; }
+.v.price { color: var(--danger); font-weight: 600; }
+.sub { font-size: 24rpx; color: #888888; }
+.desc { white-space: pre-wrap; }
+.phead { display: flex; align-items: baseline; gap: 16rpx; margin-bottom: 20rpx; }
+.empty { padding: 12rpx 0; }
+.players { display: flex; flex-wrap: wrap; gap: 20rpx 0; }
+.pl { width: 16.66%; display: flex; flex-direction: column; align-items: center; }
+.av { position: relative; width: 88rpx; height: 88rpx; border-radius: 50%; background: #D5DBE3; }
+.avimg { width: 88rpx; height: 88rpx; border-radius: 50%; }
+.gd { position: absolute; right: -6rpx; bottom: -6rpx; width: 32rpx; height: 32rpx; line-height: 32rpx; border-radius: 50%; color: #FFFFFF; font-size: 18rpx; text-align: center; }
+.gd.m { background: var(--primary); }
+.gd.f { background: #D9486A; }
+.nick { margin-top: 6rpx; font-size: 22rpx; color: var(--text-2); max-width: 110rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.notice { background: #FFF4E5; color: #B25E00; font-size: 26rpx; padding: 18rpx 24rpx; border-radius: 16rpx; }
+.bottom-bar { align-items: center; }
+.bprice { flex: none; }
+.small { font-size: 24rpx; }
+.pv { font-size: 36rpx; color: var(--danger); font-weight: 600; }
+.main { flex: 1; }
+.mask { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.5); display: flex; align-items: flex-end; }
+.panel { width: 100%; background: #FFFFFF; border-radius: 24rpx 24rpx 0 0; padding: 36rpx 36rpx calc(36rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; gap: 18rpx; }
+.center { text-align: center; }
+.genders { display: flex; gap: 24rpx; }
+.gbtn { flex: 1; height: 128rpx; border: 4rpx solid var(--border); border-radius: 20rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.gbtn.on { border-color: var(--primary); background: var(--primary-light); }
+.gbtn.dim { opacity: 0.4; }
+.gname { font-size: 32rpx; font-weight: 600; }
+.gp { font-size: 24rpx; color: var(--danger); }
+.warn { background: #FFF4E5; color: #B25E00; font-size: 26rpx; padding: 16rpx 20rpx; border-radius: 12rpx; }
+.pay { display: flex; align-items: center; gap: 16rpx; margin-top: 8rpx; }
+.paybtn { margin-left: auto; width: 320rpx; }
+.price { color: var(--danger); font-size: 36rpx; font-weight: 600; }

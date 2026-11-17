@@ -2,7 +2,7 @@
 <scroll-view class="dates" scroll-x enhanced show-scrollbar="{{false}}">
   <view wx:for="{{days}}" wx:key="date" class="date {{item.date === date ? 'on' : ''}}" data-date="{{item.date}}" bindtap="pickDate">{{item.label}}</view>
 </scroll-view>
-<view class="legend muted">点格子选择，可多选 · 已订和待支付的格子不能锁</view>
+<view class="legend muted">点格子选择，可多选 · 已订、待支付和球局的格子不能锁</view>
 <view class="grid-anchor"></view>
 <court-grid courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" tail="{{120}}" bind:celltap="onCellTap" />
 <view class="bottom-bar">

@@ -5,6 +5,7 @@
     "pages/me/index",
     "pages/cart/index",
     "pages/product/index",
+    "pages/game/index",
     "pages/order/pay/index",
     "pages/order/result/index",
     "pages/order/list/index",
@@ -24,7 +25,10 @@
     "pages/admin/price-daily/index",
     "pages/admin/hours/index",
     "pages/admin/reports/index",
-    "pages/admin/staff/index"
+    "pages/admin/staff/index",
+    "pages/admin/games/index",
+    "pages/admin/game-edit/index",
+    "pages/admin/game-manage/index"
   ],
   "window": {
     "navigationBarBackgroundColor": "#2B5AAE",

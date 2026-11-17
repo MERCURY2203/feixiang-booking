@@ -23,7 +23,7 @@ Page({
     this.setData({
       user,
       phoneMasked: maskPhone(user && user.phone),
-      isAdmin: !!user && (user.role === 'owner' || user.role === 'staff')
+      isAdmin: !!user && (user.role === 'owner' || user.role === 'staff' || user.role === 'host')
     })
   },
 
@@ -124,7 +124,9 @@ Page({
     })
   },
 
+  // 組局員只有球局管理，直接進那一頁（澄清 N1）
   goAdmin() {
-    wx.navigateTo({ url: '/pages/admin/home/index' })
+    const role = this.data.user && this.data.user.role
+    wx.navigateTo({ url: role === 'host' ? '/pages/admin/games/index' : '/pages/admin/home/index' })
   }
 })

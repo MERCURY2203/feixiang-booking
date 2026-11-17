@@ -15,7 +15,7 @@ const _ = db.command
 const COLLECTIONS = [
   'users', 'slot_locks', 'orders', 'order_items', 'products', 'prices',
   'business_hours', 'banners', 'refunds', 'audit_logs', 'invites', 'settings',
-  'verify_logs', 'notices', 'user_pending', 'coupon_codes', 'locks'
+  'verify_logs', 'notices', 'user_pending', 'coupon_codes', 'locks', 'games'
 ]
 
 const BUDGET_MS = 50 * 1000

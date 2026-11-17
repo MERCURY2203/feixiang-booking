@@ -15,7 +15,7 @@ function isOwner(user) {
 
 function displayName(user) {
   if (!user) return ''
-  return user.remark || user.nickname || (user.role === 'owner' ? '老板' : '员工')
+  return user.remark || user.nickname || (user.role === 'owner' ? '老板' : user.role === 'host' ? '组局员' : '员工')
 }
 
 module.exports = { getCaller, isAdmin, isOwner, displayName }

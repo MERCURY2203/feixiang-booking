@@ -38,7 +38,7 @@ Page({
       .call('staff', 'redeemInvite', { code: this.code })
       .then(user => {
         getApp().globalData.user = user
-        const role = user.role === 'owner' ? '老板' : '员工'
+        const role = user.role === 'owner' ? '老板' : user.role === 'host' ? '组局员' : '员工'
         this.setData({ status: 'ok', message: `绑定成功，你已成为${role}` })
       })
       .catch(err => this.setData({ status: 'fail', message: err.message }))

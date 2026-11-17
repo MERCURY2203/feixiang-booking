@@ -1,0 +1,66 @@
+<view class="container">
+  <view wx:if="{{!id}}" class="card">
+    <view class="label {{err.cells ? 'bad' : ''}}">1 · 选日期和要锁的场地 <text class="star">*</text></view>
+    <scroll-view class="dates" scroll-x enhanced show-scrollbar="{{false}}">
+      <view wx:for="{{days}}" wx:key="date" class="date {{item.date === date ? 'on' : ''}}" data-date="{{item.date}}" bindtap="pickDate">{{item.label}}</view>
+    </scroll-view>
+    <court-grid courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{300}}" bind:celltap="onCellTap" />
+    <view class="muted small">绿色可选；灰色已被订走或已过去，不能选；蓝色是你选的。可选多个场，时段要连续。</view>
+    <view wx:if="{{summary}}" class="sum">{{summary}}</view>
+  </view>
+
+  <view class="card">
+    <view class="label {{err.title ? 'bad' : ''}}">标题 <text class="star">*</text></view>
+    <input class="field" value="{{title}}" data-field="title" bindinput="input" maxlength="40" placeholder="写明水平，例如：周五晚 中级局（中羽3–4级）" />
+    <view class="label">封面图（选填，4:3）</view>
+    <view class="imgs">
+      <view wx:if="{{cover}}" class="img-box">
+        <image class="img" src="{{cover}}" mode="aspectFill" />
+        <view class="img-del" bindtap="removeCover">×</view>
+      </view>
+      <view wx:else class="img-add" bindtap="addCover">＋</view>
+    </view>
+    <view class="label">标签（选填，最多 4 个，用顿号隔开）</view>
+    <input class="field" value="{{tags}}" data-field="tags" bindinput="input" placeholder="例如：中级、双打轮转、提供用球" />
+    <view class="label {{err.desc ? 'bad' : ''}}">详情说明 <text class="star">*</text></view>
+    <textarea class="area" value="{{desc}}" data-field="desc" bindinput="input" maxlength="1000" placeholder="写明水平和玩法、注意事项" />
+  </view>
+
+  <view wx:if="{{!id}}" class="card">
+    <view class="two">
+      <view class="half">
+        <view class="label {{err.priceM ? 'bad' : ''}}">男价格（元）<text class="star">*</text></view>
+        <input class="field" type="digit" value="{{priceM}}" data-field="priceM" bindinput="input" placeholder="例如：45" />
+      </view>
+      <view class="half">
+        <view class="label {{err.priceF ? 'bad' : ''}}">女价格（元）<text class="star">*</text></view>
+        <input class="field" type="digit" value="{{priceF}}" data-field="priceF" bindinput="input" placeholder="例如：35" />
+      </view>
+    </view>
+    <view class="two">
+      <view class="half">
+        <view class="label">总人数上限</view>
+        <input class="field" type="number" value="{{cap}}" data-field="cap" bindinput="input" placeholder="不填不限" />
+      </view>
+      <view class="half">
+        <view class="label">最少人数</view>
+        <input class="field" type="number" value="{{minPlayers}}" data-field="minPlayers" bindinput="input" placeholder="不填不限" />
+      </view>
+    </view>
+    <view class="two">
+      <view class="half">
+        <view class="label">男上限</view>
+        <input class="field" type="number" value="{{capM}}" data-field="capM" bindinput="input" placeholder="不填不限" />
+      </view>
+      <view class="half">
+        <view class="label">女上限</view>
+        <input class="field" type="number" value="{{capF}}" data-field="capF" bindinput="input" placeholder="不填不限" />
+      </view>
+    </view>
+    <view class="muted small">带 * 的是必填。可退截止自动定为开局前 15 分钟；设了最少人数的，开局前 2 小时人数不足会自动取消并全额退款。</view>
+  </view>
+
+  <view wx:if="{{errText}}" class="errbox">{{errText}}</view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar"><button class="btn btn-primary" bindtap="submit">{{id ? '保存' : '发布球局（同时锁定所选场地）'}}</button></view>

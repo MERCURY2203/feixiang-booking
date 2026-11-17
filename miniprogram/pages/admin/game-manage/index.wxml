@@ -1,0 +1,36 @@
+<view class="container" wx:if="{{g}}">
+  <view class="card">
+    <view class="row"><text class="card-title">{{g.title}}</text><text class="st">{{g.status}}</text></view>
+    <view class="muted">{{g.when}} · {{g.courtsText}}</view>
+    <view class="muted">男 {{g.priceMText}} · 女 {{g.priceFText}} · 发起人：{{g.host}}</view>
+    <view class="muted">已收 {{g.incomeText}}（已扣除退款）</view>
+    <view class="stats">
+      <view class="stat"><view class="sv">{{g.joined}}{{g.cap ? '/' + g.cap : ''}}</view><view class="sl">已报名</view></view>
+      <view class="stat"><view class="sv">{{g.M}} · {{g.F}}</view><view class="sl">男 · 女</view></view>
+      <view class="stat"><view class="sv">{{g.waiting}}</view><view class="sl">候补</view></view>
+    </view>
+    <view wx:if="{{g.minPlayers}}" class="muted small">最少 {{g.minPlayers}} 人；开局前 2 小时不足会自动取消</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">报名名单</view>
+    <view wx:if="{{!g.list.length}}" class="muted empty">还没有人报名</view>
+    <view wx:for="{{g.list}}" wx:key="itemId" class="pl">
+      <view class="av"><image wx:if="{{item.avatar}}" class="avimg" src="{{item.avatar}}" mode="aspectFill" /></view>
+      <view class="pinfo">
+        <view>{{item.nick}} <text class="gd {{item.gender === 'F' ? 'f' : 'm'}}">{{item.gender === 'F' ? '女' : '男'}}</text> <text class="ps">{{item.stateText}}</text></view>
+        <view class="muted small">{{item.time}} 报名 · {{item.priceText}}</view>
+      </view>
+      <view class="ops">
+        <text wx:if="{{g.canEditGender}}" class="op" data-index="{{index}}" bindtap="setGender">改性别</text>
+        <text wx:if="{{g.canKick}}" class="op danger" data-index="{{index}}" bindtap="kick">移出并退款</text>
+      </view>
+    </view>
+    <view class="muted small">移出会全额原路退款；有候补的话，按顺序自动补上。「改性别」只影响客人之后的报名。</view>
+  </view>
+  <view class="bottom-spacer"></view>
+</view>
+<view class="bottom-bar" wx:if="{{g}}">
+  <button class="btn btn-secondary" bindtap="edit">编辑说明</button>
+  <button class="btn btn-danger" disabled="{{!g.canCancel}}" bindtap="cancel">取消球局</button>
+</view>

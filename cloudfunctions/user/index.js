@@ -14,6 +14,7 @@ function publicUser(u) {
     nickname: u.nickname || '',
     avatar: u.avatar || '',
     phone: u.phone || '',
+    gender: u.gender || '',
     agreedPrivacyAt: u.agreedPrivacyAt || null,
     agreedPrivacyVersion: u.agreedPrivacyVersion || ''
   }
@@ -128,7 +129,8 @@ exports.main = async event => {
         const pending = await db.collection('orders').where({ userId: user._id, status: 'pending' }).count()
         const courts = await db.collection('order_items').where({ userId: user._id, kind: 'court', status: 'active', startAt: _.gt(now) }).count()
         const coupons = await db.collection('order_items').where({ userId: user._id, kind: 'product', codeActive: true }).count()
-        if (pending.total || courts.total || coupons.total) return fail('你还有未使用的场地或券，请先使用或退款后再注销', 'HAS_ACTIVE')
+        const gamesLeft = await db.collection('order_items').where({ userId: user._id, kind: 'game', status: 'active', startAt: _.gt(now) }).count()
+        if (pending.total || courts.total || coupons.total || gamesLeft.total) return fail('你还有未使用的场地或券，请先使用或退款后再注销', 'HAS_ACTIVE')
         if (user.role !== 'customer') return fail('老板和员工请先由老板移除身份后再注销')
         await db.collection('orders').where({ userId: user._id }).update({ data: { phone: '', deletedUser: true } })
         await db.collection('verify_logs').where({ userId: user._id }).update({ data: { phone: '' } })
@@ -140,7 +142,7 @@ exports.main = async event => {
           if (os.data.length < 100) break
         }
         await users.doc(user._id).update({
-          data: { openid: `deleted_${user._id}`, phone: '', nickname: '', avatar: '', deletedAt: now }
+          data: { openid: `deleted_${user._id}`, phone: '', nickname: '', avatar: '', gender: '', deletedAt: now }
         })
         return ok(true)
       }

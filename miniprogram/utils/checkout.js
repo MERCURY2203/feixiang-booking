@@ -37,8 +37,9 @@ function afterPay(orderId, paid) {
 }
 
 // items：[{ type:'court', date, court, hour } | { type:'product', productId, qty }]
+// 球局報名：items 傳空，action 'gameJoin'、params { gameId, gender }（澄清 N15，與購買同一流程）
 // 返回 { ok, invalid }
-async function start(page, items, { fromCart, expectTotal } = {}) {
+async function start(page, items, { fromCart, expectTotal, action = 'checkout', params } = {}) {
   // 還沒同意協議：先彈出同意畫面，不同意就不下單（澄清 L1）
   if (!(await privacy.ensure(page))) return { ok: false }
   const hasCourt = items.some(i => i.type === 'court')
@@ -62,7 +63,7 @@ async function start(page, items, { fromCart, expectTotal } = {}) {
   wx.showLoading({ title: '提交中', mask: true })
   let res
   try {
-    res = await api.call('booking', 'checkout', { items, expectTotal })
+    res = await api.call('booking', action, params || { items, expectTotal })
   } catch (err) {
     wx.hideLoading()
     if (err.code === 'HAS_PENDING') {
