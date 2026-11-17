@@ -3,7 +3,11 @@
 const api = require('../../utils/api')
 const cart = require('../../utils/cart')
 const { formatFen } = require('../../utils/money')
-const { syncServerTime } = require('../../utils/time')
+const { syncServerTime, dayTab } = require('../../utils/time')
+const share = require('../../utils/share')
+
+// 底部固定區域的高度（rpx）：圖例一行 56 ＋ 結算欄 120（澄清 M1、M3）
+const FOOTER_RPX = 176
 
 const REFRESH_MS = 15000
 
@@ -16,7 +20,6 @@ Page({
     hours: [],
     cells: [],
     gridHeight: 400,
-    cartCount: 0,
     loaded: false
   },
 
@@ -25,7 +28,6 @@ Page({
   },
 
   onShow() {
-    this.setData({ cartCount: cart.count() })
     if (this.data.loaded) {
       this.measure()
       this.load(false)
@@ -48,7 +50,8 @@ Page({
   measure() {
     const win = wx.getWindowInfo()
     wx.createSelectorQuery().select('.grid-anchor').boundingClientRect(rect => {
-      if (rect) this.setData({ gridHeight: Math.max(240, Math.floor(win.windowHeight - rect.top)) })
+      const footer = (FOOTER_RPX * win.windowWidth) / 750
+      if (rect) this.setData({ gridHeight: Math.max(240, Math.floor(win.windowHeight - rect.top - footer)) })
     }).exec()
   },
 
@@ -89,7 +92,7 @@ Page({
         }
         if (first || dateChanged) {
           this.wantDate = res.date
-          update.days = res.days
+          update.days = this.tabs(res.days)
           update.date = res.date
           update.courts = res.courts
           update.hours = res.hours
@@ -107,14 +110,29 @@ Page({
             if (!old || old.cls !== c.cls || old.text !== c.text) diff[`cells[${r}][${ci}]`] = c
           })
         )
-        if (res.days.length !== this.data.days.length || (res.days[0] && res.days[0].date !== this.data.days[0].date)) diff.days = res.days
+        if (res.days.length !== this.data.days.length || (res.days[0] && res.days[0].date !== this.data.days[0].date)) diff.days = this.tabs(res.days)
         if (update.banners) diff.banners = update.banners
         // 橫幅出現或消失會改變表格上方的高度，要重新量
         if (Object.keys(diff).length) this.setData(diff, () => diff.banners && this.measure())
       })
       .catch(err => {
-        if (first && seq === this.seq) api.toast(err.message)
+        if (!first || seq !== this.seq) return
+        if (share.isSinglePage()) this.setData({ single: true, loaded: true })
+        else api.toast(err.message)
       })
+  },
+
+  // 日期條每格兩行：今天／明天／周四 + 11-17（澄清 M1）
+  tabs(days) {
+    return days.map(d => ({ ...d, ...dayTab(d.date) }))
+  },
+
+  onShareAppMessage() {
+    return share.BOOKING
+  },
+
+  onShareTimeline() {
+    return { title: share.BOOKING.title }
   },
 
   pickDate(e) {
@@ -132,10 +150,9 @@ Page({
     const hour = this.data.hours[r].hour
     const added = cart.toggleCourt(this.data.date, court, hour)
     if (added === null) return api.toast(cart.FULL_TIP)
-    this.setData({
-      [`cells[${r}][${c}].cls`]: added ? 'sel' : 'free',
-      cartCount: cart.count()
-    })
+    this.setData({ [`cells[${r}][${c}].cls`]: added ? 'sel' : 'free' })
+    const bar = this.selectComponent('#cartBar')
+    if (bar) bar.refresh()
   },
 
   onBannerTap(e) {

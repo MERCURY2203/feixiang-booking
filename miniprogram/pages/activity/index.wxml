@@ -1,8 +1,13 @@
 <view class="container">
-  <view wx:if="{{loaded && !list.length}}" class="placeholder">暂无活动，敬请期待</view>
+  <view wx:if="{{single}}" class="placeholder">点击下方「前往小程序」查看活动并购买</view>
+<view wx:elif="{{loaded && !list.length}}" class="placeholder">暂无活动，敬请期待</view>
   <view wx:for="{{list}}" wx:key="_id" class="pcard" data-index="{{index}}" bindtap="open">
-    <image class="pimg" src="{{item.image}}" mode="aspectFill" />
+    <view class="pimg-box">
+      <image class="pimg" src="{{item.image}}" mode="aspectFill" />
+      <view class="ptag">{{item.tag}}</view>
+    </view>
     <view class="pname">{{item.name}}</view>
+    <view class="psub">{{item.stock > 0 ? (item.fixedDate ? '固定日期' : '长期') + ' · 剩余 ' + item.stock + ' 份' : '已售罄'}}</view>
     <view class="pbar">
       <text class="pprice">{{item.priceText}}</text>
       <button class="btn {{item.stock > 0 ? 'btn-primary' : ''}} add" disabled="{{item.stock <= 0}}" data-index="{{index}}" catchtap="add">{{item.stock > 0 ? '加入购物车' : '已售罄'}}</button>
@@ -10,5 +15,5 @@
   </view>
   <view class="bottom-spacer"></view>
 </view>
-<cart-fab count="{{cartCount}}" />
+<cart-bar id="cartBar" mode="activity" />
 <privacy-modal id="privacy" />

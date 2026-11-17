@@ -1,1 +1,1 @@
-{ "navigationBarTitleText": "活动", "usingComponents": { "cart-fab": "/components/cart-fab/index" } }
+{ "navigationBarTitleText": "活动", "usingComponents": { "cart-bar": "/components/cart-bar/index" } }

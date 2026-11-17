@@ -1,5 +1,16 @@
 .banner { height: 422rpx; }
 .banner-img { width: 100%; height: 422rpx; }
 .dates { white-space: nowrap; background: #FFFFFF; border-bottom: 1rpx solid var(--border); padding: 16rpx 0 16rpx 24rpx; }
-.date { display: inline-block; padding: 14rpx 24rpx; margin-right: 16rpx; border-radius: 12rpx; border: 1rpx solid var(--border); font-size: 28rpx; }
-.date.on { background: var(--primary); border-color: var(--primary); color: #FFFFFF; font-weight: 600; }
+.date { display: inline-block; width: 120rpx; padding: 12rpx 0; margin-right: 14rpx; border-radius: 14rpx; border: 2rpx solid #F4F5F7; background: #F4F5F7; text-align: center; vertical-align: top; }
+.date .d1 { font-size: 24rpx; color: #666666; }
+.date .d2 { font-size: 32rpx; font-weight: 600; color: #1A1A1A; margin-top: 4rpx; }
+.date.on { background: var(--primary-light); border-color: var(--primary); }
+.date.on .d1, .date.on .d2 { color: var(--primary); }
+/* 圖例：固定在結算欄上方（澄清 M1） */
+.legend { position: fixed; left: 0; right: 0; bottom: 120rpx; z-index: 19; height: 56rpx; display: flex; align-items: center; gap: 28rpx; padding: 0 28rpx; background: #FFFFFF; border-top: 1rpx solid var(--border); font-size: 22rpx; color: #666666; }
+.lg { display: flex; align-items: center; }
+.sw { width: 32rpx; height: 24rpx; border-radius: 6rpx; margin-right: 8rpx; box-sizing: border-box; }
+.sw-ok { border: 3rpx solid #4E8C17; background: #FFFFFF; }
+.sw-no { background: #F2F2F2; }
+.sw-sel { background: #2B5AAE; }
+.lg-hint { margin-left: auto; color: #999999; }

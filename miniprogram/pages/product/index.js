@@ -3,12 +3,15 @@ const api = require('../../utils/api')
 const cart = require('../../utils/cart')
 const checkout = require('../../utils/checkout')
 const { formatFen } = require('../../utils/money')
+const share = require('../../utils/share')
 
 Page({
-  data: { p: null, qty: 1, subtotalText: '' },
+  data: { p: null, qty: 1, subtotalText: '', single: null },
 
   onLoad(options) {
     this.id = options.id
+    // 分享帶過來的名稱和價格：朋友圈單頁模式讀不到資料時用來顯示（澄清 M5）
+    this.shared = { name: options.n ? decodeURIComponent(options.n) : '', price: Number(options.pr) || 0 }
   },
 
   onShow() {
@@ -21,11 +24,37 @@ Page({
       .then(p => {
         const qty = Math.min(this.data.qty, Math.max(1, p.stock))
         this.setData({ p: { ...p, priceText: formatFen(p.price) }, qty, subtotalText: formatFen(p.price * qty) })
+        this.loadShareImage(p.images[0])
       })
       .catch(err => {
-        api.toast(err.message)
+        if (share.isSinglePage()) {
+          this.setData({ single: { name: this.shared.name || '飞翔球馆活动', priceText: this.shared.price ? formatFen(this.shared.price) : '' } })
+          return
+        }
+        // 分享出去的活動已下架或刪除：提示後帶到活動列表（澄清 M4）
+        api.toast(err.code === 'OFF_SHELF' ? '活动已下架' : err.message)
         setTimeout(() => wx.switchTab({ url: '/pages/activity/index' }), 1200)
       })
+  },
+
+  // 分享卡片的圖片要用網址：把封面圖的雲存儲編號換成臨時網址
+  loadShareImage(fileId) {
+    if (!fileId || this.shareImageFor === fileId || !wx.cloud || !wx.cloud.getTempFileURL) return
+    this.shareImageFor = fileId
+    wx.cloud
+      .getTempFileURL({ fileList: [fileId] })
+      .then(r => (this.shareImage = (r.fileList[0] || {}).tempFileURL || ''))
+      .catch(() => (this.shareImage = ''))
+  },
+
+  onShareAppMessage() {
+    const p = this.data.p
+    return share.productShare(p, this.shareImage, p ? p.priceText : '').app
+  },
+
+  onShareTimeline() {
+    const p = this.data.p
+    return share.productShare(p, this.shareImage, p ? p.priceText : '').timeline
   },
 
   change(e) {

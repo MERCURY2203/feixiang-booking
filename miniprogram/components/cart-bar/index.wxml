@@ -1,0 +1,11 @@
+<view class="cart-bar">
+  <view class="cb-cart" bindtap="goCart">
+    <image class="cb-icon" src="/images/cart.png" mode="aspectFit" />
+    <view wx:if="{{count > 0}}" class="cb-badge">{{count > 99 ? '99+' : count}}</view>
+  </view>
+  <view class="cb-sum" bindtap="goCart">
+    <view class="cb-s1">{{mode === 'booking' ? '已选 ' + courtCount + ' 场 · ' : ''}}购物车共 {{count}} 件</view>
+    <view class="cb-s2">{{totalText}}</view>
+  </view>
+  <view class="cb-go {{empty ? 'off' : ''}}" bindtap="goCheckout">{{empty && mode === 'booking' ? '请选择场地' : '去结算'}}</view>
+</view>

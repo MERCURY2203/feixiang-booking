@@ -54,11 +54,13 @@ Page({
     this.setData({ 'form.mode': e.currentTarget.dataset.mode })
   },
 
+  // 新時段接在最後一段後面；最後一段已到 24:00 就不能再加（澄清 M7）
   addSlot() {
     const slots = this.data.form.slots.slice()
-    const last = slots[slots.length - 1]
-    const start = last ? Math.min(last.end, 23) : 9
-    slots.push({ start, end: Math.min(start + 1, 24), weekday: this.data.form.weekday, weekend: this.data.form.weekend })
+    const last = slots.reduce((m, s) => (!m || s.end > m.end ? s : m), null)
+    if (last && last.end >= 24) return api.toast('已排到 24:00，无法再添加')
+    const start = last ? last.end : 9
+    slots.push({ start, end: start + 1, weekday: this.data.form.weekday, weekend: this.data.form.weekend })
     this.setData({ 'form.slots': slots })
   },
 

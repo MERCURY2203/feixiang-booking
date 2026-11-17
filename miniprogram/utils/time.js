@@ -32,4 +32,16 @@ function formatBeijing(ts = now()) {
   return `${p.year}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}`
 }
 
-module.exports = { syncServerTime, now, beijingParts, formatBeijing, pad }
+// 日期條兩行文字（澄清 M1）：上行「今天／明天／周四」，下行「11-17」；date 是 'YYYY-MM-DD'
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+function dayTab(date, ts = now()) {
+  const p = beijingParts(ts)
+  const today = `${p.year}-${pad(p.month)}-${pad(p.day)}`
+  const t = beijingParts(ts + 24 * 3600 * 1000)
+  const tomorrow = `${t.year}-${pad(t.month)}-${pad(t.day)}`
+  const [y, m, d] = date.split('-').map(Number)
+  const top = date === today ? '今天' : date === tomorrow ? '明天' : WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return { top, bottom: `${pad(m)}-${pad(d)}` }
+}
+
+module.exports = { syncServerTime, now, beijingParts, formatBeijing, pad, dayTab }

@@ -3,6 +3,6 @@
   "disableScroll": true,
   "usingComponents": {
     "court-grid": "/components/court-grid/index",
-    "cart-fab": "/components/cart-fab/index"
+    "cart-bar": "/components/cart-bar/index"
   }
 }

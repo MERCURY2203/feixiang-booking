@@ -1,6 +1,7 @@
 const { CLOUD_ENV } = require('./config')
 const { syncServerTime } = require('./utils/time')
 const api = require('./utils/api')
+const { isSinglePage } = require('./utils/share')
 
 App({
   globalData: {
@@ -10,6 +11,11 @@ App({
 
   onLaunch() {
     wx.cloud.init({ env: CLOUD_ENV, traceUser: true })
+    // 朋友圈單頁模式不能登入（澄清 M5）：不登入，頁面只做展示
+    if (isSinglePage()) {
+      this.userReady = Promise.resolve(null)
+      return
+    }
     this.userReady = this.refreshUser()
   },
 

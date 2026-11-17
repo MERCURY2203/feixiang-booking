@@ -466,7 +466,15 @@ exports.main = async event => {
         return u.ok(
           res.data
             .filter(p => !p.fixedDate || p.activityStartAt > now)
-            .map(p => ({ _id: p._id, name: p.name, image: (p.images || [])[0] || '', price: p.price, stock: p.stock }))
+            .map(p => {
+              // 卡片左上角標籤：固定日期顯示活動時間，長期顯示「长期有效」（澄清 M2）
+              let tag = '长期有效'
+              if (p.fixedDate) {
+                const d = new Date(p.activityStartAt + 8 * u.HOUR)
+                tag = `${u.cnDate(p.activityDate)} ${u.pad(d.getUTCHours())}:${u.pad(d.getUTCMinutes())}`
+              }
+              return { _id: p._id, name: p.name, image: (p.images || [])[0] || '', price: p.price, stock: p.stock, fixedDate: !!p.fixedDate, tag }
+            })
         )
       }
       case 'product': {

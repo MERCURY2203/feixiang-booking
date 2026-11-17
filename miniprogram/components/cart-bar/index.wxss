@@ -1,0 +1,9 @@
+.cart-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: 120rpx; box-sizing: border-box; display: flex; align-items: center; gap: 20rpx; padding: 0 28rpx; background: #FFFFFF; border-top: 1rpx solid #E6E6E6; }
+.cb-cart { position: relative; flex: none; width: 76rpx; height: 76rpx; border-radius: 50%; background: #E8EFFA; display: flex; align-items: center; justify-content: center; }
+.cb-icon { width: 44rpx; height: 44rpx; }
+.cb-badge { position: absolute; top: -8rpx; right: -10rpx; min-width: 32rpx; height: 32rpx; line-height: 32rpx; padding: 0 8rpx; box-sizing: border-box; border-radius: 16rpx; background: #E54545; color: #FFFFFF; font-size: 20rpx; text-align: center; }
+.cb-sum { flex: 1; min-width: 0; }
+.cb-s1 { font-size: 22rpx; color: #888888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-s2 { font-size: 36rpx; font-weight: 600; color: #E54545; }
+.cb-go { flex: none; height: 80rpx; line-height: 80rpx; padding: 0 40rpx; border-radius: 40rpx; background: #2B5AAE; color: #FFFFFF; font-size: 30rpx; font-weight: 600; }
+.cb-go.off { background: #D9D9D9; color: #8C8C8C; }

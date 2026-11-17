@@ -38,3 +38,10 @@
 </view>
 <phone-sheet id="phoneSheet" />
 <privacy-modal id="privacy" />
+<view wx:if="{{!p && single}}" class="container">
+  <view class="card single">
+    <view class="name">{{single.name}}</view>
+    <view wx:if="{{single.priceText}}" class="price">{{single.priceText}}</view>
+    <view class="muted">点击下方「前往小程序」查看详情并购买</view>
+  </view>
+</view>

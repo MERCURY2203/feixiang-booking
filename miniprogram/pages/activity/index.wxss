@@ -1,7 +1,11 @@
 .pcard { background: #FFFFFF; border: 1rpx solid var(--border); border-radius: 20rpx; overflow: hidden; margin-bottom: 28rpx; }
 /* 卡片內寬 684rpx（750 - 左右留白 64 - 邊框 2），按 4:3 顯示商品圖：684 × 3 ÷ 4 = 513（澄清 L7） */
 .pimg { width: 100%; height: 513rpx; display: block; background: var(--past); }
+.pimg-box { position: relative; }
+/* 圖片左上角：活動時間或「长期有效」（澄清 M2） */
+.ptag { position: absolute; left: 16rpx; top: 16rpx; padding: 4rpx 14rpx; border-radius: 8rpx; background: rgba(0, 0, 0, 0.55); color: #FFFFFF; font-size: 22rpx; }
 .pname { padding: 20rpx 28rpx 0; font-size: 34rpx; font-weight: 600; }
+.psub { padding: 6rpx 28rpx 0; font-size: 24rpx; color: #888888; }
 .pbar { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 28rpx 24rpx; }
 .pprice { font-size: 38rpx; font-weight: 600; }
 .add { height: 72rpx; font-size: 28rpx; }

@@ -638,10 +638,17 @@ const cloudPay = require('wx-server-sdk').cloudPay
 const ROOT = path.join(__dirname, '..')
 
 // 在沙盒裡執行小程序頁面代碼，取出 Page({...}) 的物件；setData 只做最簡單的路徑賦值
+// 頁面沙盒裡預設的分享模組：不是朋友圈單頁模式
+const SHARE_STUB = { isSinglePage: () => false, productShare: () => ({ app: {}, timeline: {} }), BOOKING: {}, ACTIVITY: {} }
+function dayTabStub(date) {
+  return { top: '', bottom: date.slice(5) }
+}
+
 function loadPage(file, mods, extra = {}) {
   let page
   const req = name => {
     for (const [k, v] of Object.entries(mods)) if (name.endsWith(k)) return v
+    if (name.endsWith('/share')) return SHARE_STUB
     return {}
   }
   vm.runInNewContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), { Page: o => (page = o), require: req, console, ...extra })
@@ -795,7 +802,7 @@ test('B4 商品頁「立即购买」遇到改價：頁面更新成新價，再�
 test('B5 訂場頁：點新日期後才發出的自動刷新，也查客人點的新日期', async () => {
   const pending = []
   const api = { call: (_s, _a, input) => new Promise(resolve => pending.push({ date: input.date, resolve })), toast() {} }
-  const page = loadPage('miniprogram/pages/booking/index.js', { '/api': api, '/cart': { hasCourt: () => false }, '/money': { formatFen: String }, '/time': { syncServerTime() {} } })
+  const page = loadPage('miniprogram/pages/booking/index.js', { '/api': api, '/cart': { hasCourt: () => false }, '/money': { formatFen: String }, '/time': { syncServerTime() {}, dayTab: dayTabStub } })
   page.measure = () => {}
   page.data.date = '2026-11-11'
   const res = date => ({ date, days: [{ date }], serverNow: BASE, hours: [], courts: [], cells: [], banners: [] })
@@ -1429,7 +1436,7 @@ function loadPrivacy({ apiCall } = {}) {
   let def
   vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/components/privacy-modal/index.js'), 'utf8'), {
     Component: d => (def = d), wx, getApp: () => app, console,
-    require: n => (n.endsWith('/api') ? api : n.endsWith('/config') ? config : privacy)
+    require: n => (n.endsWith('/api') ? api : n.endsWith('/config') ? config : n.endsWith('/share') ? SHARE_STUB : privacy)
   })
   const events = []
   const comp = { data: JSON.parse(JSON.stringify(def.data)), ...def.methods }
@@ -1635,6 +1642,146 @@ test('C7 常用價格分時段：時段價優先於預設價，單日價格仍�
   // 沒有 slots 的舊資料照舊
   must(await call(admin, 'oO', { action: 'saveRegular', weekday: 6500, weekend: 10000 }))
   assert.strictEqual(await priceAt(D, 9, 5), 6500)
+})
+
+// ---------------- 訂場頁、活動頁改版與分享（2026-11-17，M1–M7） ----------------
+
+function loadUtil(file, mods = {}) {
+  const ctx = { module: { exports: {} }, console, wx: mods.wx || {}, require: n => {
+    for (const [k, v] of Object.entries(mods)) if (n.endsWith(k)) return v
+    return {}
+  } }
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram', file), 'utf8'), ctx)
+  return ctx.module.exports
+}
+
+test('M1 訂場頁：可訂格子綠框綠字、已選藍色實心；日期兩行（今天／明天／周幾）；有圖例', async () => {
+  const css = fs.readFileSync(path.join(ROOT, 'miniprogram/components/court-grid/index.wxss'), 'utf8')
+  const cell = /\n\.cell \{([^}]*)\}/.exec(css)[1]
+  assert(/border:\s*\d+rpx solid #4E8C17/.test(cell) && /color:\s*#4E8C17/.test(cell), '可訂格子要綠框綠字')
+  assert(/\.cell\.sel \{[^}]*background:\s*#2B5AAE[^}]*color:\s*#FFFFFF/.test(css), '已選要藍色實心白字')
+  assert(/\.cell\.taken::before/.test(css), '不可訂保留灰色叉')
+  const time = loadUtil('utils/time.js')
+  const ts = Date.UTC(2026, 10, 17, 4, 0) // 北京時間 11-17（周二）中午
+  assert.deepStrictEqual({ ...time.dayTab('2026-11-17', ts) }, { top: '今天', bottom: '11-17' })
+  assert.deepStrictEqual({ ...time.dayTab('2026-11-18', ts) }, { top: '明天', bottom: '11-18' })
+  assert.deepStrictEqual({ ...time.dayTab('2026-11-19', ts) }, { top: '周四', bottom: '11-19' })
+  assert.strictEqual(time.dayTab('2026-11-17', Date.UTC(2026, 10, 17, 15, 59)).top, '今天') // 北京 23:59 仍是今天
+  const wxml = fs.readFileSync(path.join(ROOT, 'miniprogram/pages/booking/index.wxml'), 'utf8')
+  for (const t of ['可预订', '不可订', '我的选择', '<cart-bar']) assert(wxml.includes(t), `訂場頁缺少 ${t}`)
+  assert(!wxml.includes('cart-fab'))
+})
+
+test('M2 活動列表：卡片標籤（活動時間／长期有效）和類型、剩餘份數', async () => {
+  const list = must(await call(booking, 'oA', { action: 'products' }))
+  const fixed = list.find(p => p._id === 'p2')
+  const long = list.find(p => p._id === 'p1')
+  assert.strictEqual(long.tag, '长期有效')
+  assert.strictEqual(long.fixedDate, false)
+  assert.strictEqual(fixed.fixedDate, true)
+  assert(/^\d+月\d+日 \d{2}:\d{2}$/.test(fixed.tag), `標籤格式不對：${fixed.tag}`)
+  const wxml = fs.readFileSync(path.join(ROOT, 'miniprogram/pages/activity/index.wxml'), 'utf8')
+  assert(wxml.includes('{{item.tag}}') && wxml.includes('剩余') && wxml.includes('<cart-bar'))
+})
+
+test('M3 底部結算欄：件數、整個購物車合計（不含失效項）、空的時按鈕變灰', async () => {
+  let items = [{ type: 'court', date: D, court: 1, hour: 19 }, { type: 'court', date: '2026-11-09', court: 1, hour: 19 }, { type: 'product', productId: 'p1', qty: 2 }]
+  const wx = { getStorageSync: () => items, setStorageSync: (_k, v) => (items = v), navigateTo() {} }
+  const cart = loadUtil('utils/cart.js', { wx })
+  const api = { call: async (svc, action, p) => { const r = await call(booking, 'oA', { action, ...p }); if (!r.ok) throw new Error(r.message); return r.data } }
+  let def
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/components/cart-bar/index.js'), 'utf8'), {
+    Component: d => (def = d), wx, console,
+    require: n => (n.endsWith('/api') ? api : n.endsWith('/cart') ? cart : { formatFen: f => `¥${(f / 100).toFixed(2)}` })
+  })
+  const comp = { data: JSON.parse(JSON.stringify(def.data)), ...def.methods, properties: { mode: 'booking' } }
+  comp.setData = patch => Object.assign(comp.data, patch)
+  await comp.refresh()
+  assert.strictEqual(comp.data.count, 4) // 2 格場地 + 2 張券
+  assert.strictEqual(comp.data.courtCount, 2)
+  // 11-09 那格已過去（失效），不計入：65 + 50×2
+  const q = must(await call(booking, 'oA', { action: 'quote', items }))
+  const expect = q.filter(i => i.valid).reduce((s, i) => s + i.price * i.qty, 0)
+  assert.strictEqual(comp.data.totalText, `¥${(expect / 100).toFixed(2)}`)
+  assert(q.some(i => !i.valid))
+  assert.strictEqual(comp.data.empty, false)
+  items = []
+  await comp.refresh()
+  assert.strictEqual(comp.data.empty, true)
+  assert.strictEqual(comp.data.totalText, '¥0.00')
+  assert(!fs.existsSync(path.join(ROOT, 'miniprogram/components/cart-fab')))
+})
+
+test('M4 活動詳情分享：標題、路徑直達該活動；已下架提示「活动已下架」並帶到活動列表', async () => {
+  const share = loadUtil('utils/share.js', { wx: { getEnterOptionsSync: () => ({ scene: 1007 }) } })
+  const p = { _id: 'p1', name: '周六团课', price: 8800 }
+  const s = share.productShare(p, 'https://img/x.jpg', '¥88.00')
+  assert.strictEqual(s.app.title, '周六团课 ¥88.00')
+  assert(s.app.path.startsWith('/pages/product/index?id=p1&'))
+  assert.strictEqual(s.app.imageUrl, 'https://img/x.jpg')
+  assert(s.timeline.query.startsWith('id=p1&'))
+  assert.strictEqual(share.isSinglePage(), false)
+  // 從分享卡片打開已下架的活動
+  must(await call(admin, 'oO', { action: 'productToggle', id: 'p1', onShelf: false }))
+  const toasts = []
+  const tabs = []
+  const api = { toast: m => toasts.push(m), call: async (svc, action, x) => { const r = await call(booking, 'oA', { action, ...x }); if (!r.ok) throw Object.assign(new Error(r.message), r); return r.data } }
+  const page = loadPage('miniprogram/pages/product/index.js', { '/api': api, '/cart': {}, '/checkout': {}, '/money': { formatFen: String }, '/share': share },
+    { wx: { switchTab: o => tabs.push(o.url), getEnterOptionsSync: () => ({ scene: 1007 }) }, setTimeout: fn => fn() })
+  page.onLoad({ id: 'p1', n: encodeURIComponent('周六团课'), pr: '8800' })
+  await page.loadProduct()
+  assert.deepStrictEqual(toasts, ['活动已下架'])
+  assert.deepStrictEqual(tabs, ['/pages/activity/index'])
+})
+
+test('M5 朋友圈單頁模式：讀不到資料時顯示分享帶來的名稱和價格，不跳走、不彈同意畫面', async () => {
+  const wx1154 = { getEnterOptionsSync: () => ({ scene: 1154 }), switchTab() { throw new Error('不應跳走') } }
+  const share = loadUtil('utils/share.js', { wx: wx1154 })
+  assert.strictEqual(share.isSinglePage(), true)
+  const api = { toast() { throw new Error('不應提示') }, call: async () => { throw new Error('single page') } }
+  const page = loadPage('miniprogram/pages/product/index.js', { '/api': api, '/cart': {}, '/checkout': {}, '/money': { formatFen: f => `¥${(f / 100).toFixed(2)}` }, '/share': share }, { wx: wx1154, setTimeout() {} })
+  page.onLoad({ id: 'p1', n: encodeURIComponent('周六团课'), pr: '8800' })
+  await page.loadProduct()
+  assert.strictEqual(page.data.single.name, '周六团课')
+  assert.strictEqual(page.data.single.priceText, '¥88.00')
+  // 同意畫面不在單頁模式彈出
+  let def
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'miniprogram/components/privacy-modal/index.js'), 'utf8'), {
+    Component: d => (def = d), wx: { ...wx1154, getStorageSync: () => '' }, getApp: () => ({ globalData: {} }), console,
+    require: n => (n.endsWith('/share') ? share : n.endsWith('/config') ? { PRIVACY_VERSION: 'V' } : { STORAGE_KEY: 'k' })
+  })
+  const comp = { data: { show: false }, setData(p) { Object.assign(this.data, p) } }
+  def.lifetimes.attached.call(comp)
+  assert.strictEqual(comp.data.show, false)
+})
+
+test('M6 只有訂場首頁、活動列表、活動詳情可以分享', async () => {
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(x => (x.isDirectory() ? walk(path.join(d, x.name)) : [path.join(d, x.name)]))
+  const sharing = walk(path.join(ROOT, 'miniprogram/pages'))
+    .filter(f => f.endsWith('.js') && /onShareAppMessage|onShareTimeline/.test(fs.readFileSync(f, 'utf8')))
+    .map(f => path.relative(path.join(ROOT, 'miniprogram'), f).split(path.sep).join('/'))
+    .sort()
+  assert.deepStrictEqual(sharing, ['pages/activity/index.js', 'pages/booking/index.js', 'pages/product/index.js'])
+  for (const f of sharing) {
+    const src = fs.readFileSync(path.join(ROOT, 'miniprogram', f), 'utf8')
+    assert(src.includes('onShareAppMessage') && src.includes('onShareTimeline'), `${f} 要同時支持轉發和朋友圈`)
+  }
+})
+
+test('M7 「+ 添加时段」接在最後一段後面；已到 24:00 不能再加', async () => {
+  const toasts = []
+  const page = loadPage('miniprogram/pages/admin/prices/index.js', { '/api': { toast: m => toasts.push(m), call: async () => ({}) }, '/money': { formatFen: String, yuanToFen: Number }, '/time': { now: () => BASE, beijingParts: () => ({ year: 2026, month: 11, day: 10 }), pad: n => String(n).padStart(2, '0') } })
+  page.data.form.weekday = '65.00'
+  page.data.form.weekend = '100.00'
+  page.addSlot()
+  assert.deepStrictEqual(page.data.form.slots.map(x => [x.start, x.end]), [[9, 10]])
+  page.data.form.slots[0].end = 17
+  page.addSlot()
+  assert.deepStrictEqual(page.data.form.slots.map(x => [x.start, x.end]), [[9, 17], [17, 18]])
+  page.data.form.slots[1].end = 24
+  page.addSlot()
+  assert.strictEqual(page.data.form.slots.length, 2)
+  assert.deepStrictEqual(toasts, ['已排到 24:00，无法再添加'])
 })
 
 ;(async () => {

@@ -6,13 +6,21 @@
 
 <scroll-view class="dates" scroll-x enhanced show-scrollbar="{{false}}">
   <view wx:for="{{days}}" wx:key="date" class="date {{item.date === date ? 'on' : ''}}" data-date="{{item.date}}" bindtap="pickDate">
-    <view class="d1">{{item.label}}</view>
+    <view class="d1">{{item.top}}</view>
+    <view class="d2">{{item.bottom}}</view>
   </view>
 </scroll-view>
 
 <view class="grid-anchor"></view>
-<view wx:if="{{loaded && !days.length}}" class="placeholder">暂无可预订的日期</view>
+<view wx:if="{{single}}" class="placeholder">点击下方「前往小程序」查看场地并预订</view>
+<view wx:elif="{{loaded && !days.length}}" class="placeholder">暂无可预订的日期</view>
 <court-grid wx:else courts="{{courts}}" hours="{{hours}}" cells="{{cells}}" height="{{gridHeight}}" bind:celltap="onCellTap" />
 
-<cart-fab count="{{cartCount}}" />
+<view class="legend">
+  <view class="lg"><view class="sw sw-ok"></view>可预订</view>
+  <view class="lg"><view class="sw sw-no"></view>不可订</view>
+  <view class="lg"><view class="sw sw-sel"></view>我的选择</view>
+  <view class="lg-hint">左右滑动看更多场地</view>
+</view>
+<cart-bar id="cartBar" mode="booking" />
 <privacy-modal id="privacy" />

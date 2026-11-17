@@ -2,16 +2,27 @@
 const api = require('../../utils/api')
 const cart = require('../../utils/cart')
 const { formatFen } = require('../../utils/money')
+const share = require('../../utils/share')
 
 Page({
-  data: { list: [], loaded: false, cartCount: 0 },
+  data: { list: [], loaded: false },
 
   onShow() {
-    this.setData({ cartCount: cart.count() })
     api
       .call('booking', 'products')
       .then(list => this.setData({ list: list.map(p => ({ ...p, priceText: formatFen(p.price) })), loaded: true }))
-      .catch(err => api.toast(err.message))
+      .catch(err => {
+        if (share.isSinglePage()) this.setData({ single: true, loaded: true })
+        else api.toast(err.message)
+      })
+  },
+
+  onShareAppMessage() {
+    return share.ACTIVITY
+  },
+
+  onShareTimeline() {
+    return { title: share.ACTIVITY.title }
   },
 
   add(e) {
@@ -23,7 +34,8 @@ Page({
       return
     }
     if (!cart.addProduct(p._id, 1)) return api.toast(cart.FULL_TIP)
-    this.setData({ cartCount: cart.count() })
+    const bar = this.selectComponent('#cartBar')
+    if (bar) bar.refresh()
     wx.showToast({ title: '已加入购物车', icon: 'none', duration: 1000 })
   },
 

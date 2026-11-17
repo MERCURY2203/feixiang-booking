@@ -11,6 +11,7 @@ Component({
 
   lifetimes: {
     attached() {
+      if (require('../../utils/share').isSinglePage()) return // 朋友圈單頁模式只能看，不彈同意畫面
       const declined = getApp().globalData.privacyDeclined
       if (wx.getStorageSync(STORAGE_KEY) !== PRIVACY_VERSION && !declined) this.setData({ show: true })
     }
